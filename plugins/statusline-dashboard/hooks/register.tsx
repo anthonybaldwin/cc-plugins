@@ -160,18 +160,24 @@ async function refreshControls($: EngineInterface): Promise<void> {
  * the command now, it is put in the prompt box for the person's Enter.
  */
 async function openPicker($: EngineInterface, command: 'model' | 'effort'): Promise<void> {
+  let said: string | undefined
   try {
-    await $.command.run({ command })
+    said = (await $.command.run({ command })).text
   } catch {
     await $.prompt.fill({ text: `/${command}` }).catch(() => undefined)
     await say($, `Press Enter to open /${command}`)
     return
   }
   await refreshBreakdown($)
-  // The picked effort is saved as a setting; the row shows it now rather than at the next model
-  // request, whose own word (turn.step) corrects it if the model settled on another.
-  const level = await $.settings.read({ key: 'effortLevel' }).catch(() => undefined)
-  if (command === 'effort' && typeof level === 'string') await update($, model, (m) => (m ? { ...m, effort: level } : m))
+  // /effort answers with the level it set ("Set effort level to medium …"): the row takes that
+  // word now rather than waiting for the next model request. A cancelled picker says nothing.
+  const level = command === 'effort' ? effortSaid(said) : undefined
+  if (level) await update($, model, (m) => (m ? { ...m, effort: level } : m))
+}
+
+/** The level /effort's answer names, when it names one. */
+export function effortSaid(text: string | undefined): string | undefined {
+  return text?.match(/effort level (?:to|as|is) ["'`]?(low|medium|high|xhigh|max)\b/i)?.[1]?.toLowerCase()
 }
 
 async function toggleThinking($: EngineInterface): Promise<void> {
@@ -242,9 +248,10 @@ async function refreshBreakdown($: EngineInterface): Promise<void> {
   const thinking = budget ? Number(budget) > 0 : settings.alwaysThinkingEnabled !== false
   await update($, model, (m) => ({
     name: name || m?.name || 'Unknown Model',
-    // Until a model request reports the level in force (turn.step), the saved setting is the best
-    // word there is: a resumed or just-started session has made no request yet.
-    effort: m?.effort ?? (typeof settings.effortLevel === 'string' ? settings.effortLevel : undefined),
+    // Only what the engine itself reported (turn.step, /effort's own answer). The saved
+    // `effortLevel` setting is not the level in force: a session-only pick, an env override or a
+    // model's clamp all part them, and showing it read as a wrong level.
+    effort: m?.effort,
     thinking,
     fast: settings.fastMode === true,
   }))
