@@ -4,7 +4,7 @@
 // Widget ids (`model.effort`, `repo.pr`, …) are the user config's `hide` ids; the README table
 // and the configure skill's id list must stay in sync with the `on(...)` calls below.
 
-import type { Activity, ApiUsage, Breakdown, Counts, Entry, Host, Info, Model, Repo, Scopes, Usage } from '../types'
+import type { Activity, ApiUsage, Breakdown, Controls, Counts, Entry, Host, Info, Model, Repo, Scopes, Usage } from '../types'
 import {
   BAD,
   GOOD,
@@ -169,6 +169,8 @@ export type Inputs = {
   counts: Counts | null
   api: ApiUsage | null
   activity: Activity | null
+  /** What the Model row's pickers can change; absent in older fixtures and before the first read. */
+  controls?: Controls | null
   now: number
 }
 
@@ -184,11 +186,11 @@ const d = (t: string): Run => ({ t, d: true })
  * Builds every row. `room` is the cells an open row's detail lines get (past the toggle and
  * label); each detail line is cut to it.
  */
-export function buildSections(x: Inputs, cfg: Config, glyphs: boolean, room = 80, drill?: string): Section[] {
+export function buildSections(x: Inputs, cfg: Config, glyphs: boolean, room = 80, drill?: string, pick?: string): Section[] {
   const on = (id: string) => !cfg.hide.has(id)
   const icon: Icon = (glyph, color) => (glyphs ? [{ t: glyph, c: color }, { t: ' ' }] : [])
   const build: Record<RowId, () => Section> = {
-    model: () => modelRow(x, cfg, on, icon),
+    model: () => modelRow(x, cfg, on, icon, pick),
     limits: () => limitsRow(x, cfg, on, icon),
     usage: () => usageRow(x, on, icon),
     turn: () => turnRow(x, on, icon),
@@ -202,6 +204,7 @@ export function buildSections(x: Inputs, cfg: Config, glyphs: boolean, room = 80
   // Each open row's detail in full, and where its window stands until scrolled: the histories
   // (turns, agents) at their newest line, the todo list around the current item.
   const details: Partial<Record<RowId, () => Pick<Section, 'detail' | 'detailAt' | 'detailHead' | 'detailTail'>>> = {
+    model: () => pickDetail(x, pick),
     turn: () => ({ detail: turnDetail(x, on), detailAt: 'end' }),
     activity: () => activityDetail(x, on),
     agents: () => ({ detail: agentsDetail(x, on, glyphs), detailAt: 'end' }),
@@ -213,6 +216,36 @@ export function buildSections(x: Inputs, cfg: Config, glyphs: boolean, room = 80
     const extra = s.items.length ? details[id]?.() : undefined
     return extra?.detail?.length ? { ...s, ...extra } : s
   })
+}
+
+/** The effort levels /effort takes, lowest first. */
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+
+/** Whether a model the menu offers is the one in use: by the menu's own value, else by the session's model name. */
+export function isCurrentModel(option: string, c: Controls['model'], name: string): boolean {
+  const [o, v, n] = [option.toLowerCase(), (c?.value ?? '').toLowerCase(), name.toLowerCase()]
+  if (v) return o === v || (o === 'default' && v.startsWith('default'))
+  return n.includes(o)
+}
+
+/**
+ * An open picker as the Model row's detail, in place of the context breakdown: one line per
+ * choice, each a button (`set:model:<id>`, `set:effort:<level>`), the one in use marked.
+ */
+function pickDetail(x: Inputs, pick?: string): Pick<Section, 'detail' | 'detailAt' | 'detailHead' | 'detailTail'> {
+  const m = x.model
+  if (!m || (pick !== 'model' && pick !== 'effort')) return {}
+  const model = x.controls?.model
+  const choices = pick === 'model' ? (model?.options ?? []).map((o) => ({ id: o, on: isCurrentModel(o, model, m.name) })) : EFFORTS.map((e) => ({ id: e, on: e === m.effort }))
+  if (!choices.length) return {}
+  const line = (c: { id: string; on: boolean }): Run[] => [v(c.on ? '● ' : '○ ', c.on ? GOOD : undefined), c.on ? { t: c.id, b: true } : v(c.id)].map((r) => ({ ...r, press: `set:${pick}:${c.id}` }))
+  const locked = pick === 'model' && model?.locked
+  return {
+    detailHead: [{ t: pick === 'model' ? 'Model' : 'Effort', b: true }],
+    detailTail: [d(locked ? 'set by a managed setting' : pick === 'model' ? 'click one to switch' : 'click a level to set it')],
+    detail: choices.map(line),
+    detailAt: Math.max(0, choices.findIndex((c) => c.on) - 1),
+  }
 }
 
 // ── open-row detail: the history a closed row has no room for ──────────────────────────────────
@@ -345,12 +378,21 @@ export function effortRuns(level: string, icon: Icon): Run[] {
   }
 }
 
-function modelRow(x: Inputs, cfg: Config, on: (id: string) => boolean, icon: Icon): Section {
+// The row's three controls are buttons (`Run.press`): the model name opens the list of models
+// (`pick:model`), the effort its levels (`pick:effort`), and the lamp turns thinking on or off
+// where it stands (`toggle:thinking`) — so the lamp shows dim while thinking is off, where it
+// used to show only while on, or there would be nothing to press to turn it back on.
+function modelRow(x: Inputs, cfg: Config, on: (id: string) => boolean, icon: Icon, pick?: string): Section {
   const items: Item[] = []
   const m = x.model
-  if (m) items.push(plain([...icon(G.model, CYAN), { t: m.name, b: true }, ...(m.fast ? [v(' '), ...icon(G.speed, WARN)] : [])]))
-  const think = m?.thinking && on('model.thinking') ? icon(G.think, c256(183)) : []
-  if (m?.effort && on('model.effort')) items.push(plain([...effortRuns(m.effort, icon), ...(think.length ? [v(' '), ...think] : [])]))
+  const button = (runs: Run[], word: string, open = false): Run[] => runs.map((r) => ({ ...r, press: word, ...(open ? { u: true } : {}) }))
+  if (m) items.push(plain([...button([...icon(G.model, CYAN), { t: m.name, b: true }], 'pick:model', pick === 'model'), ...(m.fast ? [v(' '), ...icon(G.speed, WARN)] : [])]))
+  // A row a managed setting owns can't be changed: its lamp is not a button, and shows only while on.
+  const locked = x.controls?.thinking?.locked === true
+  const showLamp = !!m && on('model.thinking') && (m.thinking || !locked)
+  const lamp: Run[] = showLamp ? icon(G.think, m?.thinking ? c256(183) : undefined).map((r, i) => (i === 0 && !m?.thinking ? { ...r, d: true } : r)) : []
+  const think = locked ? lamp : button(lamp, 'toggle:thinking')
+  if (m?.effort && on('model.effort')) items.push(plain([...button(effortRuns(m.effort, icon), 'pick:effort', pick === 'effort'), ...(think.length ? [v(' '), ...think] : [])]))
   else if (think.length) items.push(plain(think))
   const u = x.usage
   if (u && on('model.context')) {

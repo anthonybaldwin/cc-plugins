@@ -80,6 +80,16 @@ export type Model = {
   fast: boolean
 }
 
+/**
+ * What the Model row can change, as Claude Code's own `/config` menu holds it (`$.config.list()`):
+ * the model row's current value and the models it offers, and whether thinking is on. `locked`
+ * when a managed setting owns the row, so a change would be refused.
+ */
+export type Controls = {
+  model?: { value: string; options: string[]; locked: boolean }
+  thinking?: { value: boolean; locked: boolean }
+}
+
 export type Repo = {
   /** The folder name of the main working tree (a worktree shows its parent repository). */
   name: string
@@ -196,9 +206,10 @@ export type Activity = {
 
 /**
  * The person's view of the band: shown or not, which rows are open (oldest first), and which
- * Config item is drilled into (its list drawn under the row).
+ * Config item is drilled into (its list drawn under the row), and which of the Model row's
+ * pickers is open (the models or the effort levels, listed under that row).
  */
-export type View = { isVisible: boolean; expanded: string[]; drill?: string }
+export type View = { isVisible: boolean; expanded: string[]; drill?: string; pick?: 'model' | 'effort' }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -212,6 +223,7 @@ declare module 'claude-code' {
       counts: Counts | null
       api: ApiUsage | null
       activity: Activity | null
+      controls: Controls | null
       view: View
       /** The user config file's parsed JSON (hooks/sections.ts parseConfig reads it); null when absent. */
       config: unknown

@@ -88,6 +88,7 @@ const fail = () => ({ value: { exitCode: 1, stdout: '', stderr: '', isStdoutTrun
 // `beneath` stands for whatever draws under the plugin in the band (another mod's note, a survey);
 // left out, or answering nothing, it is the engine's own node, which draws nothing there.
 type Beneath = ($: any, e: any) => unknown
+type Menu = { rows?: Array<{ key: string; label: string; kind: string; value: unknown; options?: string[]; provider: unknown; isLocked: boolean }>; deny?: Record<string, string>; set?: Array<[string, unknown]>; ran?: string[] }
 type Dirs = Record<string, Array<{ name: string; kind: 'file' | 'dir' }>>
 function engine(on: On, files: Record<string, string> = {}, store: Record<string, unknown> = {}, beneath?: Beneath, dirs: Dirs = {}, settings: Record<string, unknown> = {}) {
   const clock = mock.clock(on, { now: 3600e3 })
@@ -109,6 +110,21 @@ function engine(on: On, files: Record<string, string> = {}, store: Record<string
   on('session.authorize', () => ({ value: null }))
   on('settings.read', ($, e) => ({ value: (settings[String(e.source)] ?? {}) as never }))
   on('agent.list', () => ({ value: [] }))
+  // Claude Code's /config menu, as far as the Model row reads and sets it; `menu` is the fixture a
+  // test passes in `settings.menu`, and it records what was set and which commands were run.
+  const menu = (settings.menu ?? {}) as Menu
+  on('config.list', () => ({ value: (menu.rows ?? []) as never }))
+  on('config.set', ($, e) => {
+    if (menu.deny?.[e.key]) return { deny: menu.deny[e.key] as string }
+    ;(menu.set ??= []).push([e.key, e.value])
+    const row = menu.rows?.find((r) => r.key === e.key)
+    if (row) row.value = e.value as never
+    return { value: e.value }
+  })
+  on('command.run', ($, e) => {
+    ;(menu.ran ??= []).push(`/${e.command} ${e.args}`.trim())
+    return { text: 'ok' }
+  })
   on('fs.list', ($, e) => ({ value: (dirs[e.path] ?? []) as never }))
   on('fs.read', ($, e) => {
     const text = files[e.path]
@@ -628,5 +644,75 @@ test('an open Repo row scrolls its changed files; closing the row puts the windo
   await ui.press({ key: 'row:repo' })
   await ui.press({ key: 'row:repo' })
   expect(await has('1–5 of 30 ')).toBe(true)
+  await ui.unmount()
+})
+
+test('the Model row: the name picks a model, the effort a level, the lamp toggles thinking', async ($, on) => {
+  const engineRow = { provider: { plugin: 'engine', tier: 'core' }, isLocked: false }
+  const menu: Menu = {
+    rows: [
+      { key: 'model', label: 'Model', kind: 'choice', value: 'Default (recommended)', options: ['default', 'opus', 'sonnet', 'haiku'], ...engineRow },
+      { key: 'thinking', label: 'Thinking mode', kind: 'boolean', value: true, ...engineRow },
+    ],
+  }
+  const store: Record<string, unknown> = {}
+  const clock = engine(on, {}, store, undefined, {}, { menu })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await clock.settle()
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  const has = async (t: string | RegExp) => (await ui.find({ type: 'Text', text: t })) !== undefined
+  // The name opens the models the menu offers, the one in use marked; the row opens with it.
+  await ui.press({ key: 'item:pick:model' })
+  expect(store.view).toEqual({ isVisible: true, expanded: ['model'], pick: 'model' })
+  expect([await has('● '), await has('sonnet'), await has('Messages 30%')]).toEqual([true, true, false])
+  await ui.press({ key: 'item:set:model:sonnet' })
+  expect(menu.set).toEqual([['model', 'sonnet']])
+  expect(store.view).toEqual({ isVisible: true, expanded: ['model'] }) // picked: the list closes, the breakdown is back
+  expect(await has('Messages 30%')).toBe(true)
+  // The lamp flips thinking through the menu's own row.
+  await ui.press({ key: 'item:toggle:thinking' })
+  await ui.press({ key: 'item:toggle:thinking' })
+  expect(menu.set?.slice(1)).toEqual([['thinking', false], ['thinking', true]])
+  // What the menu refuses for the model goes to /model, as if typed.
+  menu.deny = { model: 'only its dialog changes it' }
+  await ui.press({ key: 'item:pick:model' })
+  await ui.press({ key: 'item:set:model:opus' })
+  expect(menu.ran).toEqual(['/model opus'])
+  await ui.unmount()
+})
+
+test('the effort picker runs /effort and shows the level at once; a locked lamp is no button', () => {
+  const x = (controls: unknown) => ({ model: { name: 'Opus 4.7', effort: 'medium', thinking: false, fast: false }, controls, now: 0 }) as never
+  const row = (controls: unknown, pick?: string) => buildSections(x(controls), parseConfig({ rows: ['model'] }), true, 80, undefined, pick).find((s) => s.id === 'model')
+  const words = (controls: unknown) => [...new Set(row(controls)?.items.flatMap((it) => it.wide.flatMap((r) => (r.press ? [r.press] : []))))]
+  // Off, the lamp still shows (dim), or there would be nothing to press to turn it on.
+  expect(words({ thinking: { value: false, locked: false } })).toEqual(['pick:model', 'pick:effort', 'toggle:thinking'])
+  expect(words({ thinking: { value: false, locked: true } })).toEqual(['pick:model', 'pick:effort'])
+  const picker = row({}, 'effort')
+  expect(text(picker?.detail ?? [])).toEqual(['○ low', '● medium', '○ high', '○ xhigh', '○ max'])
+  expect(picker?.detail?.[2]?.every((r) => r.press === 'set:effort:high')).toBe(true)
+  // No models to list: no picker detail, and the name's press opens Claude Code's own /model.
+  expect(row({}, 'model')?.detail).toBeUndefined()
+})
+
+test('picking an effort runs /effort as if typed', async ($, on) => {
+  const menu: Menu = {}
+  const clock = engine(on, {}, {}, undefined, {}, { menu })
+  on('turn.step', async function* ($, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' } as never
+  })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await clock.settle()
+  // The effort shows once a model request has reported one.
+  for await (const _ of $.turn.step({ turnId: 't1', index: 0, messageCount: 1, model: 'opus', effort: 'medium' } as never) as never as AsyncIterable<unknown>) void _
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  await ui.press({ key: 'item:pick:effort' })
+  await ui.press({ key: 'item:set:effort:high' })
+  expect(menu.ran).toEqual(['/effort high'])
+  expect(await ui.find({ type: 'Text', text: /high/ })).toBeDefined()
+  // With no model row in the menu, the name opens the built-in picker.
+  await ui.press({ key: 'item:pick:model' })
+  expect(menu.ran).toEqual(['/effort high', '/model'])
   await ui.unmount()
 })

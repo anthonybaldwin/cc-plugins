@@ -40,6 +40,9 @@ view. Run `/plugin uninstall context-bar@cc-plugins`.
 | Click a row's `▸`/`▾` label (fullscreen), or `ctrl+x tab` then Tab and Enter | Open or close that row. Only rows with more to show have the arrow; a row without one is already whole. |
 | `/dash` | Show or hide the whole dashboard. Your choice is remembered across sessions. |
 | `/dash <row>` | Open or close one row (`/dash config`) |
+| Click the model name in the Model row | Open the list of models under the row; click one to switch. The one in use is marked `●`. |
+| Click the effort | Open the effort levels (`low` … `max`); click one to set it |
+| Click the lightbulb | Turn thinking on or off. It shows dim while thinking is off. |
 | Click a Config item (its icon or count), or Tab to it and Enter | Open that item's list under the row: what the count is made of, one per line. Click it again to close, or another item to swap. |
 | Mouse wheel over the dashboard, or a row's `▲` `▼` | Scroll an open row's detail when it has more than fits. The wheel moves the row you opened last; each row's `▲` `▼` page that row. |
 | `/dash config <item>` | Print the item's whole list in the transcript and open it in the row: `/dash config skills`. Items: `instructions`, `memory`, `agents`, `commands`, `skills`, `workflows`, `routines`, `rules`, `mcp`, `connectors`, `hooks`, `plugins`, `themes`, `dirs`, `exts`. |
@@ -91,7 +94,8 @@ it's up.
 - **Model**: the model (⚡ when fast mode is on), the reasoning effort of the last model request
   (styled to echo Claude Code's `/effort` menu) with a lamp when extended thinking is on, and the
   context gauge. The gauge warns early: yellow from 50%, red from 80%. **Open** for the
-  per-category breakdown.
+  per-category breakdown. The name, the effort and the lamp are **buttons**: pick a model, pick an
+  effort level, toggle thinking (see below).
 - **Limits**: the `5h` and `7d` windows with bars, percentages, reset times and a signed **pace
   balance** against even consumption. `+N%` (green) is quota in hand, `-N%` (yellow) is burning
   ahead, and it's dim within ±2%. It also shows model-scoped weekly caps from the OAuth usage API
@@ -124,6 +128,22 @@ it's up.
 Instruction files, agents, skills, MCP servers and the sub-agent roster come straight from
 Claude Code: what is actually loaded, with trust and precedence applied. The rest is counted from
 disk and gated on workspace trust the same way Claude Code gates loading.
+
+### Changing the model, effort and thinking from the Model row
+
+- **Model**: the list is the set of models Claude Code's own `/config` menu offers your account,
+  and picking one changes it the way that menu would. Where the menu won't take the change from
+  a plugin, the dashboard runs `/model <name>` for you instead; where there is no list to show,
+  clicking the name opens Claude Code's `/model` picker.
+- **Effort**: picking a level runs `/effort <level>`, as if you had typed it, so its line shows in
+  the transcript and Claude Code checks the level against the model. The effort item appears once
+  the session's first model request has reported a level.
+- **Thinking**: the lamp flips the `/config` menu's "Thinking mode". If the change is refused (a
+  managed setting, a model that can't turn thinking off), a toast says why. A lamp locked by a
+  managed setting is not a button.
+
+While a picker is open it takes the place of the context breakdown under the row; picking, or
+clicking the same item again, brings the breakdown back.
 
 ### What a Config item's list shows
 
@@ -274,4 +294,4 @@ request itself, so the token never reaches the mod.
 Tests: `claude plugin test plugins/statusline-dashboard` covers the layout arithmetic (width,
 height budget, the breakdown bar), the parsers, the activity bookkeeping, drawing on both
 surfaces, toggling rows, the Config lists (what they hold, opening one, scrolling it), `/dash`, the
-scrolling of any open row, the user config, and the 1.x cleanup.
+scrolling of any open row, the Model row's pickers and thinking toggle, the user config, and the 1.x cleanup.

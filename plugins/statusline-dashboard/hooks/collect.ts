@@ -11,7 +11,7 @@
 
 import type { EngineInterface } from 'claude-code'
 
-import type { ApiUsage, Breakdown, Counts, Entry, Host, Info, Repo, Scopes, Segment, Usage } from '../types'
+import type { ApiUsage, Breakdown, Controls, Counts, Entry, Host, Info, Repo, Scopes, Segment, Usage } from '../types'
 import { formatTokens, homeRelative, truncate } from './layout'
 
 type $ = EngineInterface
@@ -375,6 +375,25 @@ export async function collectInfo($: $, home: string): Promise<Info> {
     sessionId: await $.session.id(),
     outputStyle: typeof settings.outputStyle === 'string' ? settings.outputStyle : undefined,
     agent: typeof settings.agent === 'string' ? settings.agent : undefined,
+  }
+}
+
+/**
+ * The `/config` rows the Model row's pickers act on. The model row lists the models this account
+ * is offered (the same set `/config model=…` takes); a build whose menu has no such row answers
+ * nothing, and the row falls back to opening Claude Code's own /model picker.
+ */
+export async function collectControls($: $): Promise<Controls | null> {
+  try {
+    const rows = await $.config.list()
+    const model = rows.find((r) => r.key === 'model')
+    const thinking = rows.find((r) => r.key === 'thinking')
+    return {
+      ...(model ? { model: { value: String(model.value), options: [...(model.options ?? [])], locked: model.isLocked } } : {}),
+      ...(thinking && typeof thinking.value === 'boolean' ? { thinking: { value: thinking.value, locked: thinking.isLocked } } : {}),
+    }
+  } catch {
+    return null
   }
 }
 

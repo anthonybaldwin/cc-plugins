@@ -23,6 +23,7 @@ import {
   type AgentEntry,
   collectApi,
   collectBreakdown,
+  collectControls,
   collectCounts,
   collectHost,
   collectInfo,
@@ -35,7 +36,7 @@ import {
   removeLegacy,
 } from './collect'
 import { ROW_IDS, SECTION_WIDTH, clampScroll, legendLines, listRows, packSection, plan, stackRuns, stripLabels, truncate, windowDetail, type DetailWindow, type Line, type RowId, type Run } from './layout'
-import { DRILLS, buildSections, drillEntries, drillText, isDrill, parseConfig, type DrillId } from './sections'
+import { DRILLS, EFFORTS, buildSections, drillEntries, drillText, isDrill, parseConfig, type DrillId } from './sections'
 
 const usage = atom({ plugin: 'statusline-dashboard', key: 'usage' } as const, null)
 const breakdown = atom({ plugin: 'statusline-dashboard', key: 'breakdown' } as const, null)
@@ -46,6 +47,7 @@ const info = atom({ plugin: 'statusline-dashboard', key: 'info' } as const, null
 const counts = atom({ plugin: 'statusline-dashboard', key: 'counts' } as const, null)
 const api = atom({ plugin: 'statusline-dashboard', key: 'api' } as const, null)
 const activity = atom({ plugin: 'statusline-dashboard', key: 'activity' } as const, null)
+const controls = atom({ plugin: 'statusline-dashboard', key: 'controls' } as const, null)
 const view = atom({ plugin: 'statusline-dashboard', key: 'view' } as const, { isVisible: true, expanded: [] } as View)
 const config = atom({ plugin: 'statusline-dashboard', key: 'config' } as const, null as unknown)
 const tick = atom({ plugin: 'statusline-dashboard', key: 'tick' } as const, 0)
@@ -92,6 +94,7 @@ async function loadView($: EngineInterface): Promise<void> {
     isVisible: saved?.isVisible !== false,
     expanded: Array.isArray(saved?.expanded) ? saved.expanded.filter((id) => (ROW_IDS as readonly string[]).includes(id)) : cfg.expanded,
     ...(isDrill(saved?.drill) ? { drill: saved.drill } : {}),
+    ...(saved?.pick === 'model' || saved?.pick === 'effort' ? { pick: saved.pick } : {}),
   }
   await update($, view, () => v)
 }
@@ -130,6 +133,82 @@ async function toggleDrill($: EngineInterface, id: DrillId, open?: boolean): Pro
   })
 }
 
+async function refreshControls($: EngineInterface): Promise<void> {
+  const c = await collectControls($)
+  if (c) await update($, controls, () => c)
+}
+
+/**
+ * Opens one of the Model row's pickers under the row (the row opens with it, as the newest open
+ * one), swaps it for the other, or closes it when it is the one already showing. With no list of
+ * models to draw (a build whose /config has no model row), the model name opens Claude Code's own
+ * /model picker instead.
+ */
+async function togglePick($: EngineInterface, what: 'model' | 'effort'): Promise<void> {
+  if (what === 'model' && !(await read($, controls))?.model?.options.length) {
+    await $.command.run({ command: 'model' }).catch(() => $.ui.toast('Run /model to pick a model'))
+    return
+  }
+  await unscroll($, 'model')
+  await saveView($, (v) => {
+    const { pick: was, ...rest } = v
+    if (was === what && v.expanded.includes('model')) return rest
+    return { ...rest, isVisible: true, pick: what, expanded: [...v.expanded.filter((x) => x !== 'model'), 'model'] }
+  })
+}
+
+async function closePick($: EngineInterface): Promise<void> {
+  await saveView($, (v) => {
+    const { pick: _closed, ...rest } = v
+    return rest
+  })
+}
+
+/**
+ * Switches the model as the /config menu would (`$.config.set`, which says why when it can't: a
+ * managed setting, a model that needs a consent only its dialog gives); where the menu refuses a
+ * plugin's change outright, `/model <name>` is run instead, as if typed.
+ */
+async function setModel($: EngineInterface, value: string): Promise<void> {
+  await closePick($)
+  const res = await $.config.set({ key: 'model', value }).catch((e) => ({ deny: String(e) }))
+  if (res.deny !== undefined) {
+    const reason = res.deny
+    await $.command.run({ command: 'model', args: value }).catch(() => $.ui.toast(`Model not changed: ${reason}`))
+  }
+  await refreshBreakdown($)
+  await refreshControls($)
+}
+
+/**
+ * Sets the effort by running `/effort <level>` as if typed: effort is no /config row, and the
+ * command is what checks the level against the model. The row shows the level at once; the next
+ * model request's own word (turn.step) corrects it if the model settled on another.
+ */
+async function setEffort($: EngineInterface, level: string): Promise<void> {
+  await closePick($)
+  if (!(EFFORTS as readonly string[]).includes(level)) return
+  try {
+    await $.command.run({ command: 'effort', args: level })
+    await update($, model, (m) => (m ? { ...m, effort: level } : m))
+  } catch (e) {
+    $.ui.toast(`Effort not changed: ${String(e)}`)
+  }
+}
+
+async function toggleThinking($: EngineInterface): Promise<void> {
+  const m = await read($, model)
+  if (!m) return
+  const value = !m.thinking
+  const res = await $.config.set({ key: 'thinking', value }).catch((e) => ({ deny: String(e) }))
+  if (res.deny !== undefined) {
+    $.ui.toast(`Thinking not changed: ${res.deny}`)
+    return
+  }
+  await update($, model, (x) => (x ? { ...x, thinking: value } : x))
+  await refreshControls($)
+}
+
 /**
  * Moves a row's detail window by `by` lines, within its ends. Back where it stands unscrolled, the
  * row's entry is dropped, so a history standing at its newest line keeps following it.
@@ -144,10 +223,19 @@ async function scrollRow($: EngineInterface, id: RowId, by: number): Promise<voi
   })
 }
 
-/** What a pressed run does: `drill:<item>` opens that item's list, `page:<row>:±1` turns that row's detail a page. */
+/**
+ * What a pressed run does: `drill:<item>` opens that Config item's list, `page:<row>:±1` turns
+ * that row's detail a page, `pick:model|effort` opens a Model row picker, `set:model|effort:<v>`
+ * takes a choice from it, `toggle:thinking` flips the lamp.
+ */
 async function press($: EngineInterface, word: string): Promise<void> {
-  const [verb, arg = '', dir = ''] = word.split(':')
+  const [verb, arg = '', ...more] = word.split(':')
+  const dir = more.join(':') // a model id may hold a colon of its own
   if (verb === 'drill' && isDrill(arg)) await toggleDrill($, arg)
+  else if (verb === 'pick' && (arg === 'model' || arg === 'effort')) await togglePick($, arg)
+  else if (verb === 'set' && arg === 'model') await setModel($, dir)
+  else if (verb === 'set' && arg === 'effort') await setEffort($, dir)
+  else if (verb === 'toggle' && arg === 'thinking') await toggleThinking($)
   else if (verb === 'page') await scrollRow($, arg as RowId, Number(dir) * (drawn.rows[arg as RowId]?.rows ?? 1))
 }
 
@@ -252,7 +340,7 @@ async function refreshApi($: EngineInterface, force = false): Promise<void> {
 async function refreshAll($: EngineInterface): Promise<void> {
   await loadConfig($)
   await Promise.all([refreshUsage($), refreshBreakdown($), refreshInfo($), refreshRepo($), refreshHost($), refreshAgents($)])
-  await Promise.all([refreshCounts($), refreshApi($)])
+  await Promise.all([refreshCounts($), refreshApi($), refreshControls($)])
 }
 
 // Every minute: the clock, reset countdowns and pace move with nothing else changing; the config
@@ -562,6 +650,7 @@ export const register: Register = (on) => {
       counts: await read($, counts),
       api: await read($, api),
       activity: await read($, activity),
+      controls: await read($, controls),
       now,
     }
     const glyphs = e.surface === 'terminal'
@@ -577,10 +666,12 @@ export const register: Register = (on) => {
     const budget = Math.max(1, Math.min(room, e.props.maxRows, cfg.maxRows))
 
     const drill = isDrill(v.drill) && v.expanded.includes('config') ? v.drill : undefined
-    const sections = buildSections(inputs, cfg, glyphs, width - indent, drill)
+    const pick = v.expanded.includes('model') ? v.pick : undefined
+    const sections = buildSections(inputs, cfg, glyphs, width - indent, drill, pick)
     const b = inputs.breakdown
     const modelRow = sections.find((s) => s.id === 'model')
-    if (modelRow && b && !cfg.hide.has('model.context')) {
+    // An open picker is the Model row's detail; without one it is the context breakdown.
+    if (modelRow && !modelRow.detail?.length && b && !cfg.hide.has('model.context')) {
       const room = width - indent
       modelRow.detail = [stackRuns(b.categories, room), ...legendLines(b.categories, b.maxTokens, room, Infinity)]
     }
