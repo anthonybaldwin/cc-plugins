@@ -34,6 +34,7 @@ import {
   platform,
   readJson,
   removeLegacy,
+  revealFolder,
 } from './collect'
 import { ROW_IDS, SECTION_WIDTH, clampScroll, legendLines, listRows, packSection, plan, stackRuns, stripLabels, truncate, windowDetail, type DetailWindow, type Line, type RowId, type Run } from './layout'
 import { DRILLS, buildSections, drillEntries, drillText, isDrill, parseConfig, type DrillId } from './sections'
@@ -206,15 +207,22 @@ async function scrollRow($: EngineInterface, id: RowId, by: number): Promise<voi
   })
 }
 
+async function revealCwd($: EngineInterface): Promise<void> {
+  const dir = await $.session.cwd()
+  if (!(await revealFolder($, dir))) await say($, `Couldn't open ${dir} in the file manager`)
+}
+
 /**
  * What a pressed run does: `drill:<item>` opens that Config item's list, `page:<row>:±1` turns
- * that row's detail a page, `open:model|effort` opens that picker, `toggle:thinking` flips the lamp.
+ * that row's detail a page, `open:model|effort` opens that picker, `toggle:thinking` flips the lamp,
+ * `reveal:cwd` opens the working directory in the file manager.
  */
 async function press($: EngineInterface, word: string): Promise<void> {
   const [verb, arg = '', value = ''] = word.split(':')
   if (verb === 'drill' && isDrill(arg)) await toggleDrill($, arg)
   else if (verb === 'open' && (arg === 'model' || arg === 'effort')) await openPicker($, arg)
   else if (verb === 'toggle' && arg === 'thinking') await toggleThinking($)
+  else if (verb === 'reveal' && arg === 'cwd') await revealCwd($)
   else if (verb === 'page') await scrollRow($, arg as RowId, Number(value) * (drawn.rows[arg as RowId]?.rows ?? 1))
 }
 

@@ -43,6 +43,8 @@ view. Run `/plugin uninstall context-bar@cc-plugins`.
 | Click the model name in the Model row | Open Claude Code's `/model` picker |
 | Click the effort | Open Claude Code's `/effort` picker |
 | Click the lightbulb | Turn thinking on or off. It shows dim while thinking is off. On a model that can't turn thinking off, a line above the dashboard says so. |
+| Click the last commit's short id (open Repo row) | Open the commit on GitHub, GitLab or Bitbucket. It is a link only once the commit is pushed. |
+| Click the folder in the Info. row | Open the working directory in Finder, Explorer or your file manager |
 | Click a Config item (its icon or count), or Tab to it and Enter | Open that item's list under the row: what the count is made of, one per line. Click it again to close, or another item to swap. |
 | Mouse wheel over the dashboard, or a row's `▲` `▼` | Scroll an open row's detail when it has more than fits. The wheel moves the row you opened last; each row's `▲` `▼` page that row. |
 | `/dash config <item>` | Print the item's whole list in the transcript and open it in the row: `/dash config skills`. Items: `instructions`, `memory`, `agents`, `commands`, `skills`, `workflows`, `routines`, `rules`, `mcp`, `connectors`, `hooks`, `plugins`, `themes`, `dirs`, `exts`. |
@@ -70,7 +72,8 @@ it's up.
     with a robot (sub-agent) or person (teammate), its type or name, its task and where it stands.
     The dashboard keeps this history itself, because Claude Code's agent list drops an agent soon
     after it finishes.
-  - **Repo**: the last commit and the changed files (the first fifty).
+  - **Repo**: the last commit and the changed files (the first fifty). The commit's short id
+    links to its page on the host once a remote branch holds it.
   - **Config**: the list behind whichever item you clicked (see below).
 - **Scrolling.** An open row's detail is a window of up to eight lines, about half the
   dashboard. When there is more, a line of controls appears above it (`3–7 of 20  ▲  ▼`, or on

@@ -109,7 +109,8 @@ export type Repo = {
   /** For the open view: the first changed paths with their two-letter status, and the last commit. */
   files?: Array<{ xy: string; path: string }>
   changedTotal?: number
-  lastCommit?: { sha: string; subject: string; at: number }
+  /** `pushed`: a remote-tracking branch holds the commit (as of the last fetch), so its page exists on the host. */
+  lastCommit?: { sha: string; subject: string; at: number; pushed?: boolean }
 }
 
 export type Host = {

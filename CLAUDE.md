@@ -102,6 +102,11 @@ key must be declared in `types/index.d.ts`.
   stays a button and a locked press says why. A change the engine refuses is never swallowed:
   `say()` shows it as a line above the band's first row for a few seconds (the `notice` atom, one
   line of the budget), not as a toast, which lands in the far corner of the screen.
+- **Other clickables.** The last commit's short id is a `Run.href` to its page on the host
+  (`commitUrl`: GitHub, GitLab, Bitbucket), only when `git branch -r --contains HEAD` finds a
+  remote branch holding it — unpushed, the page is a 404. The Info. row's folder is a Button
+  (`reveal:cwd`) that runs the platform's opener (`open` / `explorer` / `xdg-open`) with the path
+  as one argv entry.
 - **Adding a row** = a builder in `sections.ts`, an id in `ROW_IDS` and `DROP_ORDER`, the README
   row list and table, and the configure skill.
 - Glyphs only on the `terminal` surface (desktop has no Nerd Font); semantic colors are theme

@@ -285,12 +285,25 @@ function activityDetail(x: Inputs, on: (id: string) => boolean): Pick<Section, '
   return { detail: lines, detailAt: at }
 }
 
+/** A commit's page on the host, for the ones that have it: GitHub, GitLab, Bitbucket. */
+export function commitUrl(remote: Repo['remote'], sha: string): string | undefined {
+  if (!remote || !sha) return undefined
+  const h = remote.host.toLowerCase()
+  const path = h.includes('github') ? 'commit' : h.includes('gitlab') ? '-/commit' : h.includes('bitbucket') ? 'commits' : ''
+  return path ? `https://${remote.host}/${remote.owner}/${remote.name}/${path}/${sha}` : undefined
+}
+
 // The last commit and the first changed paths, colored like the branch counts.
 function repoDetail(x: Inputs, on: (id: string) => boolean): Run[][] {
   const r = x.repo
   if (!r || !on('repo.files')) return []
   const lines: Run[][] = []
-  if (r.lastCommit) lines.push([v(r.lastCommit.sha, MAGENTA), v(` ${r.lastCommit.subject}`), d(`  ${ago(x.now - r.lastCommit.at)}`)])
+  if (r.lastCommit) {
+    // The short id links to the commit's page once a remote branch holds it; before the push
+    // the page would be a 404, so it stays plain text.
+    const href = r.lastCommit.pushed ? commitUrl(r.remote, r.lastCommit.sha) : undefined
+    lines.push([{ t: r.lastCommit.sha, c: MAGENTA, ...(href ? { href } : {}) }, v(` ${r.lastCommit.subject}`), d(`  ${ago(x.now - r.lastCommit.at)}`)])
+  }
   for (const f of r.files ?? []) {
     const [mark, col] = f.xy === '??' ? ['?', BBLUE] : f.xy.includes('U') ? ['!', BAD] : f.xy[0] !== '.' ? ['+', GOOD] : ['~', WARN]
     lines.push([v(`${mark} `, col), v(f.path)])
@@ -759,7 +772,8 @@ function infoRow(x: Inputs, on: (id: string) => boolean, icon: Icon): Section {
   const i = x.info
   if (!i) return { id: 'info', label: 'Info.', items }
   const cwd = shortenPath(homeRelative(i.cwd, i.home))
-  if (cwd && on('info.cwd')) items.push(plain([...icon(G.dir, BBLUE), v(cwd)]))
+  // A button: it opens the folder in the file manager (`reveal:cwd`).
+  if (cwd && on('info.cwd')) items.push(plain([...icon(G.dir, BBLUE), v(cwd)].map((r) => ({ ...r, press: 'reveal:cwd' }))))
   if (i.outputStyle && i.outputStyle.toLowerCase() !== 'default' && on('info.style')) items.push(plain([...icon(G.style, PENCIL), v(i.outputStyle)]))
   if (i.version && on('info.version')) items.push(plain([...icon(G.version), v(`v${i.version}`)]))
   if (i.agent && on('info.agent')) items.push(plain([...icon(G.user, SILVER), v(i.agent)]))

@@ -4,7 +4,7 @@ import type { On } from 'claude-code'
 import { hookEntries, legacyKeys, parseApiUsage, parseChanged, parseGitStatus, parseLastCommit, parseRemote, parseTag } from '../hooks/collect'
 import { DROP_ORDER, ROW_IDS, bar, cells, clampScroll, legendLines, listRows, pace, packSection, plan, runsWidth, stack, stackRuns, stripLabels, windowDetail, type Section } from '../hooks/layout'
 import { editLines, emptyActivity, mergeAgents, recordTool, toolTarget } from '../hooks/register'
-import { buildSections, drillEntries, drillLines, drillText, parseConfig } from '../hooks/sections'
+import { buildSections, commitUrl, drillEntries, drillLines, drillText, parseConfig } from '../hooks/sections'
 import type { Counts, Entry } from '../types'
 
 // ── fixtures ─────────────────────────────────────────────────────────────────────────────────────
@@ -133,6 +133,7 @@ function engine(on: On, files: Record<string, string> = {}, store: Record<string
   on('process.run', ($, e) => {
     const cmd = e.argv.join(' ')
     if (cmd.startsWith('uname')) return ok('Linux\n')
+    if (cmd.startsWith('xdg-open')) return files['no opener'] ? fail() : ((files.opened = e.argv[1] ?? ''), ok(''))
     if (cmd.includes('status --porcelain')) return ok(files['git status'] ?? '# branch.oid abc\n# branch.head main\n# branch.ab +2 -0\n1 M. N... 100644 100644 100644 a b f\n? new.txt\n')
     if (cmd.includes('rev-parse')) return ok('/work\n/work/.git\n')
     if (cmd.includes('remote get-url')) return ok('git@github.com:me/work.git\n')
@@ -343,6 +344,21 @@ test('any open row scrolls the detail that does not fit, from where the row says
   const [act, ag] = [built.find((s) => s.id === 'activity'), built.find((s) => s.id === 'agents')]
   expect([act?.detail?.length, act?.detailAt]).toEqual([9 + 7 + 1, 4]) // TodoWrite's own call is a tool line too; the window starts at the last done todo
   expect([ag?.detail?.length, ag?.detailAt]).toEqual([12, 'end'])
+})
+
+test('the last commit links to its page on the host once it is pushed', () => {
+  const gh = { host: 'github.com', owner: 'me', name: 'work' }
+  expect(commitUrl(gh, 'abc1234')).toBe('https://github.com/me/work/commit/abc1234')
+  expect(commitUrl({ host: 'gitlab.com', owner: 'g/sub', name: 'r' }, 'abc1234')).toBe('https://gitlab.com/g/sub/r/-/commit/abc1234')
+  expect(commitUrl({ host: 'bitbucket.org', owner: 'o', name: 'r' }, 'abc1234')).toBe('https://bitbucket.org/o/r/commits/abc1234')
+  expect(commitUrl({ host: 'git.example.com', owner: 'o', name: 'r' }, 'abc1234')).toBeUndefined()
+  const sha = (pushed: boolean, remote: unknown = gh) => {
+    const repo = { name: 'work', branch: 'main', ahead: 0, behind: 0, staged: 0, modified: 0, untracked: 0, conflicts: 0, remote, lastCommit: { sha: 'abc1234', subject: 'Fix', at: 0, pushed } }
+    return buildSections({ repo, now: 0 } as never, parseConfig({ rows: ['repo'] }), false).find((s) => s.id === 'repo')?.detail?.[0]?.[0]
+  }
+  expect(sha(true)?.href).toBe('https://github.com/me/work/commit/abc1234')
+  expect(sha(false)?.href).toBeUndefined() // not pushed: the page would be a 404
+  expect(sha(true, null)?.href).toBeUndefined() // no remote to link to
 })
 
 // ── parsers and bookkeeping ──────────────────────────────────────────────────────────────────────
@@ -700,5 +716,19 @@ test('the effort opens /effort, and the row shows the saved level at once', asyn
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   await ui.press({ key: 'item:open:effort' })
   expect(menu.ran).toEqual(['/effort'])
+  await ui.unmount()
+})
+
+test('clicking the folder opens it in the file manager, or says it could not', async ($, on) => {
+  const files: Record<string, string> = {}
+  const clock = engine(on, files)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await clock.settle()
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  await ui.press({ key: 'item:reveal:cwd' })
+  expect(files.opened).toBe('/work')
+  files['no opener'] = 'yes'
+  await ui.press({ key: 'item:reveal:cwd' })
+  expect(await ui.find({ type: 'Text', text: /^Couldn't open \/work/ })).toBeDefined()
   await ui.unmount()
 })

@@ -248,12 +248,14 @@ const PR_TTL_MS = 5 * 60e3
  */
 export async function collectRepo($: $, cwd: string, prev: Repo | null, withPr: boolean, now: number): Promise<Repo | null> {
   const git = (...args: string[]) => run($, ['git', '--no-optional-locks', ...args], cwd)
-  const [st, rp, desc, origin, log] = await Promise.all([
+  const [st, rp, desc, origin, log, onRemote] = await Promise.all([
     git('status', '--porcelain=v2', '--branch'),
     git('rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir'),
     git('describe', '--tags', '--long', '--match', 'v*', 'HEAD'),
     git('remote', 'get-url', 'origin'),
     git('log', '-1', '--format=%h%x09%ct%x09%s'),
+    // Which remote-tracking branches hold HEAD: any at all means the commit has been pushed.
+    git('branch', '-r', '--contains', 'HEAD', '--format=%(refname)'),
   ])
   if (st === null) return null
   const s = parseGitStatus(st)
@@ -272,6 +274,7 @@ export async function collectRepo($: $, cwd: string, prev: Repo | null, withPr: 
     ...parseChanged(st),
     lastCommit: parseLastCommit(log),
   }
+  if (repo.lastCommit) repo.lastCommit.pushed = !!onRemote?.trim()
   if (withPr && repo.remote?.host.includes('github')) {
     const fresh = prev?.prBranch === s.branch && prev.prCheckedAt !== undefined && now - prev.prCheckedAt < PR_TTL_MS
     if (fresh) {
@@ -363,6 +366,18 @@ export async function collectHost($: $, home: string, sessionId: string): Promis
     user,
     host: host.split('.')[0] ?? host, // drop .local / the domain
     fleet: await fleet($, home, kind, sessionId),
+  }
+}
+
+/** Opens a folder in the platform's file manager: Finder, Explorer, or whatever xdg-open hands it to. */
+export async function revealFolder($: $, dir: string): Promise<boolean> {
+  const kind = await platform($)
+  try {
+    // The path is one argv entry, never a shell word. Explorer exits 1 even when it opened the window.
+    const r = await $.process.run([kind === 'windows' ? 'explorer' : kind === 'macos' ? 'open' : 'xdg-open', kind === 'windows' ? dir.replace(/\//g, '\\') : dir], { timeoutMs: 5000 })
+    return kind === 'windows' || r.exitCode === 0
+  } catch {
+    return false // no opener on this machine (a headless box, a container)
   }
 }
 
