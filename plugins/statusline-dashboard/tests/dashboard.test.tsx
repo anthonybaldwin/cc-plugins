@@ -701,17 +701,24 @@ test('the lamp is a button even when locked, and dim while off', () => {
   expect(words({ thinking: { value: false, locked: true } })).toEqual(['open:model', 'open:effort', 'toggle:thinking'])
   expect(row({})?.items.flatMap((it) => it.wide).find((r) => r.press === 'toggle:thinking')?.d).toBe(true)
   expect(row({})?.detail).toBeUndefined()
+  // No level known yet: the effort button still stands, as a dim `effort`.
+  const fresh = buildSections({ model: { name: 'Fable', thinking: true, fast: false }, now: 0 } as never, parseConfig({ rows: ['model'] }), false).find((s) => s.id === 'model')
+  expect(fresh?.items.flatMap((it) => it.wide).filter((r) => r.press === 'open:effort').map((r) => r.t)).toEqual(['effort'])
 })
 
 test('the effort opens /effort, and the row shows the saved level at once', async ($, on) => {
   const menu: Menu = {}
-  const clock = engine(on, {}, {}, undefined, {}, { menu })
+  const clock = engine(on, {}, {}, undefined, {}, { menu, undefined: { effortLevel: 'high' } })
   on('turn.step', async function* ($, e) {
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' } as never
   })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await clock.settle()
-  // The effort shows once a model request has reported one.
+  // Before any model request, the saved setting is what shows.
+  const early = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await early.find({ type: 'Text', text: 'high' })).toBeDefined()
+  await early.unmount()
+  // Then the level a model request reports.
   for await (const _ of $.turn.step({ turnId: 't1', index: 0, messageCount: 1, model: 'opus', effort: 'medium' } as never) as never as AsyncIterable<unknown>) void _
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   await ui.press({ key: 'item:open:effort' })

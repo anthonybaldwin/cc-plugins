@@ -136,8 +136,9 @@ disk and gated on workspace trust the same way Claude Code gates loading.
 
 - **Model** and **effort**: clicking either opens Claude Code's own picker, `/model` or `/effort`,
   as if you had typed the command. Those pickers know what a mod can't list: the models your
-  account is offered, by version, and the effort levels the current model takes. The effort item
-  appears once the session's first model request has reported a level.
+  account is offered, by version, and the effort levels the current model takes. Until the
+  session's first model request reports the level in force, the row shows your saved effort
+  setting, or a dim `effort` when there is none; it is clickable either way.
 - **Thinking**: the lamp flips the `/config` menu's "Thinking mode". Some models can't turn
   thinking off, and a managed setting can own it: then a click answers with a line above the
   dashboard's first row saying so, which clears after a few seconds.

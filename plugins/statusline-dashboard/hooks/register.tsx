@@ -242,7 +242,9 @@ async function refreshBreakdown($: EngineInterface): Promise<void> {
   const thinking = budget ? Number(budget) > 0 : settings.alwaysThinkingEnabled !== false
   await update($, model, (m) => ({
     name: name || m?.name || 'Unknown Model',
-    effort: m?.effort,
+    // Until a model request reports the level in force (turn.step), the saved setting is the best
+    // word there is: a resumed or just-started session has made no request yet.
+    effort: m?.effort ?? (typeof settings.effortLevel === 'string' ? settings.effortLevel : undefined),
     thinking,
     fast: settings.fastMode === true,
   }))
@@ -494,8 +496,8 @@ export const register: Register = (on) => {
   on('turn.step', async function* ($, e, next) {
     if (e.agentId !== undefined) return yield* next(e)
     const started = await $.clock.now()
-    if (typeof e.effort === 'string') {
-      const effort = e.effort
+    if (typeof e.effort === 'string' || typeof e.effort === 'number') {
+      const effort = String(e.effort)
       await update($, model, (m) => (m ? { ...m, effort } : m))
     }
     try {
