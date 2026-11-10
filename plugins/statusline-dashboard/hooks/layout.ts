@@ -14,8 +14,15 @@ export type Run = {
   i?: boolean
   /** Drawn dim (the theme's dim color): labels, punctuation, annotations. */
   d?: boolean
+  /** Underlined: the Config item whose list is open under the row. */
+  u?: boolean
   /** A link target (the PR badge); drawn as a Link where the surface has one. */
   href?: string
+  /**
+   * What pressing it does (`drill:skills`, `page:1`): neighboring runs with the same word draw as
+   * one Button.
+   */
+  press?: string
 }
 
 /** A row item: its widest form and its narrowest (bars and parenthesized detail go in `wide` only). */
@@ -33,7 +40,20 @@ export type Section = {
   detail?: Run[][]
 }
 
-export const ROW_IDS = ['model', 'limits', 'usage', 'turn', 'activity', 'agents', 'repo', 'config', 'exts', 'host', 'info'] as const
+/**
+ * How many entries an open drill-down's list shows at once: about half the band, never more than
+ * eight, and never more than the budget has left after the row's own `itemLines`, the list's
+ * header and one line for whatever else is on screen (another row, or the overflow strip).
+ */
+export function listRows(budget: number, itemLines: number, entries: number): number {
+  const want = Math.min(8, Math.max(3, Math.floor(budget / 2) - 1))
+  return Math.max(1, Math.min(entries, want, budget - itemLines - 2))
+}
+
+/** Where a scrolled list may start: 0 to the last full window. */
+export const clampScroll = (offset: number, entries: number, rows: number) => Math.max(0, Math.min(Math.floor(offset) || 0, entries - rows))
+
+export const ROW_IDS = ['model', 'limits', 'usage', 'turn', 'activity', 'agents', 'repo', 'config', 'host', 'info'] as const
 export type RowId = (typeof ROW_IDS)[number]
 
 /** Labels pad to this, as the status line's did; the toggle glyph and a space sit before it. */
@@ -190,7 +210,7 @@ export function packSection(section: Section, width: number, indent: number, max
 // ── planning ─────────────────────────────────────────────────────────────────────────────────────
 
 /** Which section vanishes first when even one line each won't fit: essentials last. */
-export const DROP_ORDER: RowId[] = ['exts', 'config', 'host', 'agents', 'activity', 'turn', 'repo', 'usage', 'info', 'limits', 'model']
+export const DROP_ORDER: RowId[] = ['config', 'host', 'agents', 'activity', 'turn', 'repo', 'usage', 'info', 'limits', 'model']
 
 export type PlannedRow = {
   id: RowId

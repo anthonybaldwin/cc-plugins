@@ -1,5 +1,5 @@
 // statusline-dashboard — a mod that draws the dashboard in the band above the prompt, one
-// collapsible row per section (Model, Limits, Usage, Turn, Activity, Repo, Config, Exts., Host,
+// collapsible row per section (Model, Limits, Usage, Turn, Activity, Agents, Repo, Config, Host,
 // Info.).
 //
 // WHY A MOD (2.x; 1.x was a Bun `statusLine` script): a plugin can't set `statusLine`, so 1.x had
@@ -34,8 +34,8 @@ import {
   readJson,
   removeLegacy,
 } from './collect'
-import { ROW_IDS, SECTION_WIDTH, legendLines, plan, stackRuns, stripLabels, truncate, type Line, type RowId, type Run } from './layout'
-import { buildSections, parseConfig } from './sections'
+import { ROW_IDS, SECTION_WIDTH, clampScroll, legendLines, listRows, packSection, plan, stackRuns, stripLabels, truncate, type Line, type RowId, type Run } from './layout'
+import { DRILLS, buildSections, drillEntries, drillLines, drillText, isDrill, parseConfig, type DrillId } from './sections'
 
 const usage = atom({ plugin: 'statusline-dashboard', key: 'usage' } as const, null)
 const breakdown = atom({ plugin: 'statusline-dashboard', key: 'breakdown' } as const, null)
@@ -49,6 +49,13 @@ const activity = atom({ plugin: 'statusline-dashboard', key: 'activity' } as con
 const view = atom({ plugin: 'statusline-dashboard', key: 'view' } as const, { isVisible: true, expanded: [] } as View)
 const config = atom({ plugin: 'statusline-dashboard', key: 'config' } as const, null as unknown)
 const tick = atom({ plugin: 'statusline-dashboard', key: 'tick' } as const, 0)
+const scroll = atom({ plugin: 'statusline-dashboard', key: 'scroll' } as const, 0)
+
+// How many entries the open drill-down's list drew last (0: none drawn). The render hook works it
+// out from the band's budget, which only it is told; the scroll hook and the page buttons need it
+// to know how far a page is and where the list ends. A cache of the last frame, not state: it
+// starts over with the module, and the next frame sets it again.
+const drawn = { rows: 0 }
 
 /** $.store key for the person's view (shown or not, which rows are open), kept across sessions. */
 export const STORE_VIEW = 'view'
@@ -83,6 +90,7 @@ async function loadView($: EngineInterface): Promise<void> {
   const v: View = {
     isVisible: saved?.isVisible !== false,
     expanded: Array.isArray(saved?.expanded) ? saved.expanded.filter((id) => (ROW_IDS as readonly string[]).includes(id)) : cfg.expanded,
+    ...(isDrill(saved?.drill) ? { drill: saved.drill } : {}),
   }
   await update($, view, () => v)
 }
@@ -96,6 +104,36 @@ async function saveView($: EngineInterface, fn: (v: View) => View): Promise<View
 /** Opens a closed row (as the newest open one) or closes an open one. */
 async function toggleRow($: EngineInterface, id: RowId): Promise<void> {
   await saveView($, (v) => ({ ...v, expanded: v.expanded.includes(id) ? v.expanded.filter((x) => x !== id) : [...v.expanded, id] }))
+}
+
+/**
+ * Opens a Config item's list under the row (the row opens with it, as the newest open one), swaps
+ * it for another item's, or closes it when it is the one already showing.
+ */
+async function toggleDrill($: EngineInterface, id: DrillId, open?: boolean): Promise<void> {
+  await update($, scroll, () => 0)
+  await saveView($, (v) => {
+    const showing = v.drill === id && v.expanded.includes('config')
+    if (open ?? !showing) return { ...v, isVisible: true, drill: id, expanded: [...v.expanded.filter((x) => x !== 'config'), 'config'] }
+    const { drill: _closed, ...rest } = v
+    return rest
+  })
+}
+
+/** Moves the open list by `by` entries, within its ends. */
+async function scrollList($: EngineInterface, by: number): Promise<void> {
+  const v = await read($, view)
+  if (!isDrill(v.drill)) return
+  const cfg = parseConfig(await read($, config))
+  const n = drillEntries(await read($, counts), v.drill, (id) => !cfg.hide.has(id)).length
+  await update($, scroll, (o) => clampScroll((o ?? 0) + by, n, drawn.rows))
+}
+
+/** What a pressed run does: `drill:<item>` opens that item's list, `page:±1` turns the list a page. */
+async function press($: EngineInterface, word: string): Promise<void> {
+  const [verb, arg = ''] = word.split(':')
+  if (verb === 'drill' && isDrill(arg)) await toggleDrill($, arg)
+  else if (verb === 'page') await scrollList($, Number(arg) * Math.max(1, drawn.rows))
 }
 
 async function refreshUsage($: EngineInterface): Promise<void> {
@@ -328,8 +366,8 @@ export const register: Register = (on) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'dash',
-      description: 'Show or hide the dashboard above the prompt, open or close its rows, or clean up the 1.x status line',
-      argumentHint: '[row | open <row|all> | close <row|all> | show | hide | cleanup]',
+      description: 'Show or hide the dashboard above the prompt, open or close its rows, list what a Config item counts, or clean up the 1.x status line',
+      argumentHint: '[row | config <item> | open <row|all> | close <row|all> | show | hide | cleanup]',
       immediate: true,
     })
     await update($, activity, (a) => a ?? emptyActivity())
@@ -455,13 +493,35 @@ export const register: Register = (on) => {
       })
       return { text: `${verb === 'open' ? 'Opened' : 'Closed'} ${arg}.` }
     }
+    // `/dash config skills`: the whole list in the transcript (the band shows a window of it), and
+    // the band's list opened on it. `/dash exts` still answers, for the row that item used to be.
+    const item = verb === 'config' && arg ? arg : verb === 'exts' ? 'exts' : ''
+    if (item) {
+      if (!isDrill(item)) return { text: `No Config item "${item}". Items: ${Object.keys(DRILLS).join(', ')}.` }
+      const cfg = parseConfig(await read($, config))
+      const shows = (id: string) => !cfg.hide.has(id)
+      const c = await read($, counts)
+      if (drillEntries(c, item, shows).length) await toggleDrill($, item, true)
+      return { text: drillText(c, item, shows) }
+    }
     if (isRow(verb)) {
       await toggleRow($, rowOf(verb))
       await saveView($, (x) => ({ ...x, isVisible: true }))
       return { text: `Toggled ${verb}.` }
     }
-    return { text: `Usage: /dash [${ROW_IDS.join(' | ')} | open <row|all> | close <row|all> | show | hide | cleanup]` }
+    return { text: `Usage: /dash [${ROW_IDS.join(' | ')} | config <${Object.keys(DRILLS).join('|')}> | open <row|all> | close <row|all> | show | hide | cleanup]` }
   })
+
+  // The band's tree always fits its room, so the engine has nothing of it to scroll; what the
+  // wheel over the band (and the scroll keys while it has the focus) can move is the open
+  // drill-down's list. Answering without `next` keeps the engine's window where it is; the write
+  // redraws the band with the list moved. With no list on screen the move is the engine's.
+  on('ui.scroll', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const v = await read($, view)
+    if (e.origin.kind !== 'person' || !v.isVisible || !isDrill(v.drill) || !v.expanded.includes('config') || drawn.rows < 1) return next(e)
+    await scrollList($, e.by)
+    return {}
+  }).catch(($, e, next) => next(e)) // on a failure the move is the engine's again
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const v = await read($, view)
@@ -499,7 +559,19 @@ export const register: Register = (on) => {
     const room = vp?.isFullscreen === false ? Math.floor(vp.rows / 3) : e.props.maxRows
     const budget = Math.max(1, Math.min(room, e.props.maxRows, cfg.maxRows))
 
-    const sections = buildSections(inputs, cfg, glyphs, width - indent)
+    const drill = isDrill(v.drill) && v.expanded.includes('config') ? v.drill : undefined
+    const sections = buildSections(inputs, cfg, glyphs, width - indent, drill)
+    // The open drill-down: its list sized to the budget, so the plan never has to cut it.
+    const configRow = sections.find((s) => s.id === 'config')
+    drawn.rows = 0
+    if (drill && configRow?.items.length) {
+      const shows = (id: string) => !cfg.hide.has(id)
+      const n = drillEntries(inputs.counts, drill, shows).length
+      if (n) {
+        drawn.rows = listRows(budget, packSection(configRow, width, indent).length, n)
+        configRow.detail = drillLines(inputs.counts, drill, await read($, scroll), drawn.rows, width - indent, glyphs, shows)
+      }
+    }
     const b = inputs.breakdown
     const modelRow = sections.find((s) => s.id === 'model')
     if (modelRow && b && !cfg.hide.has('model.context')) {
@@ -517,10 +589,29 @@ export const register: Register = (on) => {
       r.href && Link ? (
         <Link key={String(k)} href={r.href} label={r.t} />
       ) : (
-        <Text key={String(k)} color={r.c} backgroundColor={r.bg} weight={r.b ? 'semibold' : undefined} italic={r.i} dimColor={r.d}>
+        <Text key={String(k)} color={r.c} backgroundColor={r.bg} weight={r.b ? 'semibold' : undefined} italic={r.i} dimColor={r.d} underline={r.u}>
           {r.t}
         </Text>
       )
+    // A line's runs, each stretch that shares a `press` word drawn as one Button (a Config item,
+    // a page arrow): a press word shows once in the band, so it keys the Button.
+    const lineRuns = (rs: Run[]) => {
+      const out = []
+      for (let i = 0; i < rs.length; ) {
+        const word = rs[i]?.press
+        let j = i + 1
+        while (word && rs[j]?.press === word) j++
+        if (word) {
+          out.push(
+            <Button key={`item:${word}`} plain onPress={() => void press($, word)}>
+              {rs.slice(i, j).map(runText)}
+            </Button>,
+          )
+        } else out.push(runText(rs[i] as Run, i))
+        i = j
+      }
+      return out
+    }
     const runs = (rs: Run[]) =>
       rs.map((r, i) => (
         <Text key={String(i)} color={r.c} weight={r.b ? 'semibold' : undefined} italic={r.i} dimColor={r.d}>
@@ -542,7 +633,7 @@ export const register: Register = (on) => {
             {runs(head)}
           </Box>
         )}
-        {l.runs.map(runText)}
+        {lineRuns(l.runs)}
       </Box>
     )
     const rows = laid.rows.flatMap((r) => {

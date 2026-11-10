@@ -57,7 +57,7 @@ key must be declared in `types/index.d.ts`.
   trust-gated), the OAuth usage API via `$.session.authorize()` (the credential never reaches the
   mod), and the 1.x legacy cleanup. Each collector swallows its own failures.
 - `hooks/sections.ts` — pure row builders (state in, `Section[]` out), user-config parsing, Nerd
-  Font glyph table. Widget ids (`on("row.widget")`) must stay in sync with the README table and
+  Font glyph table, and the Config drill-downs (`DRILLS`, `drillEntries`/`drillLines`/`drillText`). Widget ids (`on("row.widget")`) must stay in sync with the README table and
   the configure skill's id list.
 - `hooks/layout.ts` — pure layout: `Run`/`Item`/`Section`, `packSection` (the status line's
   packer, carried over), `plan` (height budget), `contextDetail`/`stack` (the breakdown bar),
@@ -79,6 +79,15 @@ key must be declared in `types/index.d.ts`.
   gives every section with data one line; over budget, sections leave to a one-line overflow strip
   of toggles in `DROP_ORDER`; the oldest open row folds before the newest; other rows yield seats
   to the newest open row before it is cut. Nothing scrolls; nothing is unreachable.
+- **Config drill-downs.** A Config item with entries behind its count is a Button (`Run.press`,
+  `drill:<id>`); pressing it draws that item's list as the row's detail. The list is the one thing
+  that scrolls, and the mod scrolls it itself: a window of `listRows` entries from the `scroll`
+  atom, moved by the `ui.scroll` hook (wheel, scroll keys) and the `page:±1` buttons, so the band's
+  tree still always fits. Entries (`Entry`: name, scope, tokens, note) are collected with the
+  counts into `Counts.lists`; counts are tallied from those lists, so the two can't disagree.
+  **Adding an item** = an entry list in `collectCounts`, a `DRILLS` entry, its `Counts` field, the
+  README's item table and the configure skill. Exts. was a row until 2.1 and is the `exts` item
+  now; its `exts.*` hide ids and a bare `exts` still work.
 - **Adding a row** = a builder in `sections.ts`, an id in `ROW_IDS` and `DROP_ORDER`, the README
   row list and table, and the configure skill.
 - Glyphs only on the `terminal` surface (desktop has no Nerd Font); semantic colors are theme
