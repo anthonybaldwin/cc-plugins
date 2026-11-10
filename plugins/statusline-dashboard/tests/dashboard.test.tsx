@@ -669,6 +669,11 @@ test('the Model row: the name opens /model, the lamp toggles thinking', async ($
   if (menu.rows?.[0]) menu.rows[0].isLocked = true
   await ui.press({ key: 'item:toggle:thinking' })
   expect(menu.set?.length).toBe(2)
+  // The reason shows in the band itself, above the rows, and clears after a few seconds.
+  expect(await ui.find({ type: 'Text', text: /^Thinking is locked on/ })).toBeDefined()
+  await clock.advance(7000)
+  expect(await ui.find({ type: 'Text', text: /^Thinking is locked on/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'Opus 4.7' })).toBeDefined()
   await ui.unmount()
 })
 

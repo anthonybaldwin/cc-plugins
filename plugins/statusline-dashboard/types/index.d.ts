@@ -223,6 +223,11 @@ declare module 'claude-code' {
       api: ApiUsage | null
       activity: Activity | null
       controls: Controls | null
+      /**
+       * A line the band shows above its first row for a few seconds: what a click could not do,
+       * and why. `at` tells one notice from the next, so a timer clears only its own.
+       */
+      notice: { text: string; at: number } | null
       view: View
       /** The user config file's parsed JSON (hooks/sections.ts parseConfig reads it); null when absent. */
       config: unknown

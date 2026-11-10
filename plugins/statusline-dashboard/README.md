@@ -42,7 +42,7 @@ view. Run `/plugin uninstall context-bar@cc-plugins`.
 | `/dash <row>` | Open or close one row (`/dash config`) |
 | Click the model name in the Model row | Open Claude Code's `/model` picker |
 | Click the effort | Open the effort levels (`low` … `max`) and the thinking switch under the row; click one to set it |
-| Click the lightbulb | Turn thinking on or off. It shows dim while thinking is off. On a model that can't turn thinking off, a toast says so. |
+| Click the lightbulb | Turn thinking on or off. It shows dim while thinking is off. On a model that can't turn thinking off, a line above the dashboard says so. |
 | Click a Config item (its icon or count), or Tab to it and Enter | Open that item's list under the row: what the count is made of, one per line. Click it again to close, or another item to swap. |
 | Mouse wheel over the dashboard, or a row's `▲` `▼` | Scroll an open row's detail when it has more than fits. The wheel moves the row you opened last; each row's `▲` `▼` page that row. |
 | `/dash config <item>` | Print the item's whole list in the transcript and open it in the row: `/dash config skills`. Items: `instructions`, `memory`, `agents`, `commands`, `skills`, `workflows`, `routines`, `rules`, `mcp`, `connectors`, `hooks`, `plugins`, `themes`, `dirs`, `exts`. |
@@ -139,7 +139,8 @@ disk and gated on workspace trust the same way Claude Code gates loading.
   the session's first model request has reported a level.
 - **Thinking**: the lamp, and the `thinking` line under the effort levels, flip the `/config`
   menu's "Thinking mode". Some models can't turn thinking off, and a managed setting can own it:
-  then the line reads `locked for this model` and a click answers with a toast saying so.
+  then the line reads `locked for this model` and a click answers with a line above the dashboard's
+  first row saying so, which clears after a few seconds.
 
 While the effort list is open it takes the place of the context breakdown under the row; picking,
 or clicking the effort again, brings the breakdown back.

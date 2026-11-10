@@ -48,6 +48,10 @@ const counts = atom({ plugin: 'statusline-dashboard', key: 'counts' } as const, 
 const api = atom({ plugin: 'statusline-dashboard', key: 'api' } as const, null)
 const activity = atom({ plugin: 'statusline-dashboard', key: 'activity' } as const, null)
 const controls = atom({ plugin: 'statusline-dashboard', key: 'controls' } as const, null)
+const notice = atom({ plugin: 'statusline-dashboard', key: 'notice' } as const, null)
+
+/** How long a notice stays above the rows. */
+const NOTICE_MS = 6000
 const view = atom({ plugin: 'statusline-dashboard', key: 'view' } as const, { isVisible: true, expanded: [] } as View)
 const config = atom({ plugin: 'statusline-dashboard', key: 'config' } as const, null as unknown)
 const tick = atom({ plugin: 'statusline-dashboard', key: 'tick' } as const, 0)
@@ -133,6 +137,17 @@ async function toggleDrill($: EngineInterface, id: DrillId, open?: boolean): Pro
   })
 }
 
+/**
+ * Says something where the person is looking: a line above the band's first row, gone after a few
+ * seconds. The answer to a click in the band belongs beside it; a toast lands in the far corner
+ * of the screen, where the two don't read as cause and effect.
+ */
+async function say($: EngineInterface, text: string): Promise<void> {
+  const at = await $.clock.now()
+  await update($, notice, () => ({ text, at }))
+  $.clock.after(NOTICE_MS, () => void update($, notice, (n) => (n?.at === at ? null : n)))
+}
+
 async function refreshControls($: EngineInterface): Promise<void> {
   const c = await collectControls($)
   if (c) await update($, controls, () => c)
@@ -149,7 +164,7 @@ async function openModelPicker($: EngineInterface): Promise<void> {
     await $.command.run({ command: 'model' })
   } catch {
     await $.prompt.fill({ text: '/model' }).catch(() => undefined)
-    $.ui.toast('Press Enter to open /model')
+    await say($, 'Press Enter to open /model')
   }
   await refreshBreakdown($)
 }
@@ -186,7 +201,7 @@ async function setEffort($: EngineInterface, level: string): Promise<void> {
     await $.command.run({ command: 'effort', args: level })
     await update($, model, (m) => (m ? { ...m, effort: level } : m))
   } catch (e) {
-    $.ui.toast(`Effort not changed: ${String(e)}`)
+    await say($, `Effort not changed: ${String(e)}`)
   }
 }
 
@@ -196,13 +211,13 @@ async function toggleThinking($: EngineInterface): Promise<void> {
   // The engine locks the row for a model that can't turn thinking off, and for a managed setting.
   await refreshControls($)
   if ((await read($, controls))?.thinking?.locked) {
-    $.ui.toast(`Thinking is locked ${m.thinking ? 'on' : 'off'}: this model can't change it, or a managed setting owns it`)
+    await say($, `Thinking is locked ${m.thinking ? 'on' : 'off'}: this model can't change it, or a managed setting owns it`)
     return
   }
   const value = !m.thinking
   const res = await $.config.set({ key: 'thinking', value }).catch((e) => ({ deny: String(e) }))
   if (res.deny !== undefined) {
-    $.ui.toast(`Thinking not changed: ${res.deny}`)
+    await say($, `Thinking not changed: ${res.deny}`)
     return
   }
   await update($, model, (x) => (x ? { ...x, thinking: value } : x))
@@ -662,7 +677,9 @@ export const register: Register = (on) => {
     // the status line did, leaving the transcript room.
     const vp = e.viewport
     const room = vp?.isFullscreen === false ? Math.floor(vp.rows / 3) : e.props.maxRows
-    const budget = Math.max(1, Math.min(room, e.props.maxRows, cfg.maxRows))
+    // A notice takes one line of the budget while it shows, so the rows plan around it.
+    const said = await read($, notice)
+    const budget = Math.max(1, Math.min(room, e.props.maxRows, cfg.maxRows) - (said ? 1 : 0))
 
     const drill = isDrill(v.drill) && v.expanded.includes('config') ? v.drill : undefined
     const pick = v.expanded.includes('model') ? v.pick : undefined
@@ -763,6 +780,11 @@ export const register: Register = (on) => {
     }
     return (
       <Box flexDirection="column" paddingTop={pad}>
+        {said ? (
+          <Text key="notice" color="warning">
+            {truncate(said.text, width)}
+          </Text>
+        ) : null}
         {rows}
       </Box>
     )
