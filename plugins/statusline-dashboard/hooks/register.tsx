@@ -34,8 +34,8 @@ import {
   readJson,
   removeLegacy,
 } from './collect'
-import { ROW_IDS, SECTION_WIDTH, clampScroll, legendLines, listRows, packSection, plan, stackRuns, stripLabels, truncate, type Line, type RowId, type Run } from './layout'
-import { DRILLS, buildSections, drillEntries, drillLines, drillText, isDrill, parseConfig, type DrillId } from './sections'
+import { ROW_IDS, SECTION_WIDTH, clampScroll, legendLines, listRows, packSection, plan, stackRuns, stripLabels, truncate, windowDetail, type DetailWindow, type Line, type RowId, type Run } from './layout'
+import { DRILLS, buildSections, drillEntries, drillText, isDrill, parseConfig, type DrillId } from './sections'
 
 const usage = atom({ plugin: 'statusline-dashboard', key: 'usage' } as const, null)
 const breakdown = atom({ plugin: 'statusline-dashboard', key: 'breakdown' } as const, null)
@@ -49,13 +49,14 @@ const activity = atom({ plugin: 'statusline-dashboard', key: 'activity' } as con
 const view = atom({ plugin: 'statusline-dashboard', key: 'view' } as const, { isVisible: true, expanded: [] } as View)
 const config = atom({ plugin: 'statusline-dashboard', key: 'config' } as const, null as unknown)
 const tick = atom({ plugin: 'statusline-dashboard', key: 'tick' } as const, 0)
-const scroll = atom({ plugin: 'statusline-dashboard', key: 'scroll' } as const, 0)
+const scroll = atom({ plugin: 'statusline-dashboard', key: 'scroll' } as const, {} as Record<string, number>)
 
-// How many entries the open drill-down's list drew last (0: none drawn). The render hook works it
-// out from the band's budget, which only it is told; the scroll hook and the page buttons need it
-// to know how far a page is and where the list ends. A cache of the last frame, not state: it
-// starts over with the module, and the next frame sets it again.
-const drawn = { rows: 0 }
+// The detail windows the last frame drew, by row, for the rows whose detail did not all fit. The
+// render hook works each out from the band's budget, which only it is told; the scroll hook and
+// the page buttons need them to know how far a page is, where a row's detail ends, and where its
+// window stands unscrolled. A cache of the last frame, not state: it starts over with the module,
+// and the next frame sets it again.
+const drawn: { rows: Partial<Record<RowId, DetailWindow>> } = { rows: {} }
 
 /** $.store key for the person's view (shown or not, which rows are open), kept across sessions. */
 export const STORE_VIEW = 'view'
@@ -101,8 +102,17 @@ async function saveView($: EngineInterface, fn: (v: View) => View): Promise<View
   return next
 }
 
+/** Puts a row's detail back where it stands unscrolled. */
+async function unscroll($: EngineInterface, id: RowId): Promise<void> {
+  await update($, scroll, (o) => {
+    const { [id]: _gone, ...rest } = o ?? {}
+    return rest
+  })
+}
+
 /** Opens a closed row (as the newest open one) or closes an open one. */
 async function toggleRow($: EngineInterface, id: RowId): Promise<void> {
+  await unscroll($, id)
   await saveView($, (v) => ({ ...v, expanded: v.expanded.includes(id) ? v.expanded.filter((x) => x !== id) : [...v.expanded, id] }))
 }
 
@@ -111,7 +121,7 @@ async function toggleRow($: EngineInterface, id: RowId): Promise<void> {
  * it for another item's, or closes it when it is the one already showing.
  */
 async function toggleDrill($: EngineInterface, id: DrillId, open?: boolean): Promise<void> {
-  await update($, scroll, () => 0)
+  await unscroll($, 'config')
   await saveView($, (v) => {
     const showing = v.drill === id && v.expanded.includes('config')
     if (open ?? !showing) return { ...v, isVisible: true, drill: id, expanded: [...v.expanded.filter((x) => x !== 'config'), 'config'] }
@@ -120,20 +130,25 @@ async function toggleDrill($: EngineInterface, id: DrillId, open?: boolean): Pro
   })
 }
 
-/** Moves the open list by `by` entries, within its ends. */
-async function scrollList($: EngineInterface, by: number): Promise<void> {
-  const v = await read($, view)
-  if (!isDrill(v.drill)) return
-  const cfg = parseConfig(await read($, config))
-  const n = drillEntries(await read($, counts), v.drill, (id) => !cfg.hide.has(id)).length
-  await update($, scroll, (o) => clampScroll((o ?? 0) + by, n, drawn.rows))
+/**
+ * Moves a row's detail window by `by` lines, within its ends. Back where it stands unscrolled, the
+ * row's entry is dropped, so a history standing at its newest line keeps following it.
+ */
+async function scrollRow($: EngineInterface, id: RowId, by: number): Promise<void> {
+  const w = drawn.rows[id]
+  if (!w) return
+  await update($, scroll, (o) => {
+    const { [id]: at, ...rest } = o ?? {}
+    const to = clampScroll((at ?? w.base) + by, w.total, w.rows)
+    return to === w.base ? rest : { ...rest, [id]: to }
+  })
 }
 
-/** What a pressed run does: `drill:<item>` opens that item's list, `page:±1` turns the list a page. */
+/** What a pressed run does: `drill:<item>` opens that item's list, `page:<row>:±1` turns that row's detail a page. */
 async function press($: EngineInterface, word: string): Promise<void> {
-  const [verb, arg = ''] = word.split(':')
+  const [verb, arg = '', dir = ''] = word.split(':')
   if (verb === 'drill' && isDrill(arg)) await toggleDrill($, arg)
-  else if (verb === 'page') await scrollList($, Number(arg) * Math.max(1, drawn.rows))
+  else if (verb === 'page') await scrollRow($, arg as RowId, Number(dir) * (drawn.rows[arg as RowId]?.rows ?? 1))
 }
 
 async function refreshUsage($: EngineInterface): Promise<void> {
@@ -513,13 +528,15 @@ export const register: Register = (on) => {
   })
 
   // The band's tree always fits its room, so the engine has nothing of it to scroll; what the
-  // wheel over the band (and the scroll keys while it has the focus) can move is the open
-  // drill-down's list. Answering without `next` keeps the engine's window where it is; the write
-  // redraws the band with the list moved. With no list on screen the move is the engine's.
+  // wheel over the band (and the scroll keys while it has the focus) can move is an open row's
+  // detail: the row opened last among those with more than fits. Answering without `next` keeps
+  // the engine's window where it is; the write redraws the band with the detail moved. With
+  // nothing to scroll the move is the engine's.
   on('ui.scroll', { component: 'AbovePrompt' }, async ($, e, next) => {
     const v = await read($, view)
-    if (e.origin.kind !== 'person' || !v.isVisible || !isDrill(v.drill) || !v.expanded.includes('config') || drawn.rows < 1) return next(e)
-    await scrollList($, e.by)
+    const row = [...v.expanded].reverse().find((id) => drawn.rows[id as RowId]) as RowId | undefined
+    if (e.origin.kind !== 'person' || !v.isVisible || !row) return next(e)
+    await scrollRow($, row, e.by)
     return {}
   }).catch(($, e, next) => next(e)) // on a failure the move is the engine's again
 
@@ -561,22 +578,21 @@ export const register: Register = (on) => {
 
     const drill = isDrill(v.drill) && v.expanded.includes('config') ? v.drill : undefined
     const sections = buildSections(inputs, cfg, glyphs, width - indent, drill)
-    // The open drill-down: its list sized to the budget, so the plan never has to cut it.
-    const configRow = sections.find((s) => s.id === 'config')
-    drawn.rows = 0
-    if (drill && configRow?.items.length) {
-      const shows = (id: string) => !cfg.hide.has(id)
-      const n = drillEntries(inputs.counts, drill, shows).length
-      if (n) {
-        drawn.rows = listRows(budget, packSection(configRow, width, indent).length, n)
-        configRow.detail = drillLines(inputs.counts, drill, await read($, scroll), drawn.rows, width - indent, glyphs, shows)
-      }
-    }
     const b = inputs.breakdown
     const modelRow = sections.find((s) => s.id === 'model')
     if (modelRow && b && !cfg.hide.has('model.context')) {
       const room = width - indent
-      modelRow.detail = [stackRuns(b.categories, room), ...legendLines(b.categories, b.maxTokens, room)]
+      modelRow.detail = [stackRuns(b.categories, room), ...legendLines(b.categories, b.maxTokens, room, Infinity)]
+    }
+    // Each open row's detail, cut to a window sized to the budget so the plan never has to cut
+    // it; what is left over scrolls (ui.scroll, the page buttons).
+    drawn.rows = {}
+    const at = await read($, scroll)
+    for (const s of sections) {
+      if (!s.detail?.length || !v.expanded.includes(s.id)) continue
+      const w = windowDetail(s, at?.[s.id], listRows(budget, packSection(s, width, indent).length, s.detail.length), width - indent)
+      s.detail = w.lines
+      if (w.total > w.rows) drawn.rows[s.id] = w
     }
     const laid = plan(sections, v.expanded, budget, width, indent)
     if (!laid.rows.length) return next(e)

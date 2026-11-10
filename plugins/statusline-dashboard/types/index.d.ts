@@ -217,8 +217,11 @@ declare module 'claude-code' {
       config: unknown
       /** Bumped every minute so the clock, countdowns and pace redraw with nothing else changing. */
       tick: number
-      /** First entry the open drill-down's list shows: the mod scrolls its own rows. */
-      scroll: number
+      /**
+       * Where the person scrolled each open row's detail to (its first line), by row id; a row
+       * they have not scrolled has no entry and stands where the row says (the top, or the newest line).
+       */
+      scroll: Record<string, number>
     }
   }
 }

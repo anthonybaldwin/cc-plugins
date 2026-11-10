@@ -41,7 +41,7 @@ view. Run `/plugin uninstall context-bar@cc-plugins`.
 | `/dash` | Show or hide the whole dashboard. Your choice is remembered across sessions. |
 | `/dash <row>` | Open or close one row (`/dash config`) |
 | Click a Config item (its icon or count), or Tab to it and Enter | Open that item's list under the row: what the count is made of, one per line. Click it again to close, or another item to swap. |
-| Mouse wheel over the dashboard, or the list's `▲` `▼` | Scroll the open list |
+| Mouse wheel over the dashboard, or a row's `▲` `▼` | Scroll an open row's detail when it has more than fits. The wheel moves the row you opened last; each row's `▲` `▼` page that row. |
 | `/dash config <item>` | Print the item's whole list in the transcript and open it in the row: `/dash config skills`. Items: `instructions`, `memory`, `agents`, `commands`, `skills`, `workflows`, `routines`, `rules`, `mcp`, `connectors`, `hooks`, `plugins`, `themes`, `dirs`, `exts`. |
 | `/dash open all` · `/dash close all` | Open or close every row |
 | `/dash cleanup` | Remove the 1.x `statusLine` / `subagentStatusLine` blocks from `settings.json` (the agent panel's rows are now the [agent-panel](../agent-panel/) plugin) |
@@ -60,16 +60,20 @@ it's up.
   - **Model**: the context window broken down by category, as `/context` shows it — a stacked
     bar, one color per category, and a legend.
   - **Turn**: the last five turns — duration, output, input and how much of it came from the cache.
-  - **Activity**: the todo list around the current item, and the last five tool calls, one per
-    line with what each acted on (✔ answered, ✘ failed, … running; repeats collapse to `×n`).
-  - **Agents**: the session's last six sub-agents and teammates in the order they started, each
+  - **Activity**: the todo list, starting around the current item, and the last eight tool calls,
+    one per line with what each acted on (✔ answered, ✘ failed, … running; repeats collapse to
+    `×n`).
+  - **Agents**: the session's last twenty sub-agents and teammates in the order they started, each
     with a robot (sub-agent) or person (teammate), its type or name, its task and where it stands.
     The dashboard keeps this history itself, because Claude Code's agent list drops an agent soon
     after it finishes.
-  - **Repo**: the last commit and the first changed files.
+  - **Repo**: the last commit and the changed files (the first fifty).
   - **Config**: the list behind whichever item you clicked (see below).
-  The list of a Config item is a window of up to eight lines, about half the dashboard. The
-  dashboard itself never scrolls; the list does, under the wheel or its `▲` `▼`.
+- **Scrolling.** An open row's detail is a window of up to eight lines, about half the
+  dashboard. When there is more, a line of controls appears above it (`3–7 of 20  ▲  ▼`, or on
+  a Config list's title) and the detail scrolls under the wheel or the `▲` `▼`. The dashboard
+  itself never scrolls. Histories (Turn, Agents) start at their newest line and keep following
+  it until you scroll; closing a row puts its window back.
 - **Height budget.** In fullscreen the dashboard takes what the bottom slot has left. On the main
   screen it takes at most a third of the terminal, so the conversation keeps its room. Over
   budget, in this order:
@@ -270,4 +274,4 @@ request itself, so the token never reaches the mod.
 Tests: `claude plugin test plugins/statusline-dashboard` covers the layout arithmetic (width,
 height budget, the breakdown bar), the parsers, the activity bookkeeping, drawing on both
 surfaces, toggling rows, the Config lists (what they hold, opening one, scrolling it), `/dash`, the
-user config, and the 1.x cleanup.
+scrolling of any open row, the user config, and the 1.x cleanup.

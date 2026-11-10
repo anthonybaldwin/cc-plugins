@@ -13,7 +13,6 @@ import {
   bar,
   c256,
   cells,
-  clampScroll,
   contextColor,
   formatClock,
   formatCost,
@@ -27,6 +26,7 @@ import {
   truncate,
   truncateRuns,
   usageColor,
+  windowDetail,
   type Item,
   type RowId,
   type Run,
@@ -199,20 +199,24 @@ export function buildSections(x: Inputs, cfg: Config, glyphs: boolean, room = 80
     host: () => hostRow(x, cfg, on, icon),
     info: () => infoRow(x, on, icon),
   }
-  const details: Partial<Record<RowId, () => Run[][]>> = {
-    turn: () => turnDetail(x, on),
+  // Each open row's detail in full, and where its window stands until scrolled: the histories
+  // (turns, agents) at their newest line, the todo list around the current item.
+  const details: Partial<Record<RowId, () => Pick<Section, 'detail' | 'detailAt' | 'detailHead' | 'detailTail'>>> = {
+    turn: () => ({ detail: turnDetail(x, on), detailAt: 'end' }),
     activity: () => activityDetail(x, on),
-    agents: () => agentsDetail(x, on, glyphs),
-    repo: () => repoDetail(x, on),
+    agents: () => ({ detail: agentsDetail(x, on, glyphs), detailAt: 'end' }),
+    repo: () => ({ detail: repoDetail(x, on) }),
+    config: () => (isDrill(drill) ? drillDetail(x.counts, drill, room, glyphs, on) : {}),
   }
   return cfg.rows.map((id) => {
     const s = build[id]()
-    const extra = s.items.length ? details[id]?.() ?? [] : []
-    return extra.length ? { ...s, detail: extra.map((l) => truncateRuns(l, room)) } : s
+    const extra = s.items.length ? details[id]?.() : undefined
+    return extra?.detail?.length ? { ...s, ...extra } : s
   })
 }
 
 // ── open-row detail: the history a closed row has no room for ──────────────────────────────────
+// Everything the state holds, one line each: the row shows a window of it and scrolls the rest.
 
 const ago = (ms: number) => (ms < 60e3 ? 'now' : `${formatDuration(ms)} ago`)
 
@@ -242,18 +246,18 @@ const TODO_MARK: Record<string, [string, string | undefined]> = {
   pending: ['○', undefined],
 }
 
-// The todo list, the last few tool calls (✔ answered, ✘ failed, … running), and the sub-agents.
-function activityDetail(x: Inputs, on: (id: string) => boolean): Run[][] {
+// The todo list, the last tool calls (✔ answered, ✘ failed, … running), and the sub-agents.
+function activityDetail(x: Inputs, on: (id: string) => boolean): Pick<Section, 'detail' | 'detailAt'> {
   const a = x.activity
-  if (!a) return []
+  if (!a) return {}
   const lines: Run[][] = []
+  let at = 0
   const tasks = Object.values(a.tasks)
   const todos = tasks.length ? tasks : a.todoItems ?? []
   if (todos.length && on('activity.todo')) {
-    // Around the current item: the last done, the current, and what comes next.
-    const cur = Math.max(0, todos.findIndex((t) => t.status !== 'completed'))
-    const from = Math.max(0, Math.min(cur - 1, todos.length - 4))
-    for (const t of todos.slice(from, from + 4)) {
+    // The window starts around the current item: the last done, the current, and what comes next.
+    at = Math.max(0, todos.findIndex((t) => t.status !== 'completed') - 1)
+    for (const t of todos) {
       const [mark, col] = TODO_MARK[t.status] ?? ['○', undefined]
       lines.push([v(`${mark} `, col), t.status === 'completed' ? d(t.subject) : v(t.subject)])
     }
@@ -268,7 +272,7 @@ function activityDetail(x: Inputs, on: (id: string) => boolean): Run[][] {
       else runs.push({ label, ok: t.ok, n: 1 })
     }
     // One call per line, newest last like the turn history: side by side, the targets got cut.
-    for (const c of runs.slice(-5)) {
+    for (const c of runs) {
       lines.push([
         v(c.label),
         c.ok === undefined ? v(' …', WARN) : c.ok ? v(` ${OK}`, GOOD) : v(` ${NO}`, BAD),
@@ -276,7 +280,7 @@ function activityDetail(x: Inputs, on: (id: string) => boolean): Run[][] {
       ])
     }
   }
-  return lines
+  return { detail: lines, detailAt: at }
 }
 
 // The last commit and the first changed paths, colored like the branch counts.
@@ -492,8 +496,6 @@ function activityRow(x: Inputs, on: (id: string) => boolean, icon: Icon): Sectio
 // want their own history. Closed: how many sub-agents run, a green tally of finished ones (failed in
 // red), and who is on the team. Open: the history, newest last (agentsDetail).
 
-const isLive = (st: string) => st === 'running' || st === 'pending' || st === 'waiting'
-
 function agentsRow(x: Inputs, on: (id: string) => boolean, icon: Icon): Section {
   const items: Item[] = []
   const ag = x.activity?.agents
@@ -513,21 +515,19 @@ function agentsRow(x: Inputs, on: (id: string) => boolean, icon: Icon): Section 
   return { id: 'agents', label: 'Agents', items }
 }
 
-// The last six sub-agents and teammates, plus any older one still running: a robot or a person,
+// The session's sub-agents and teammates in start order (the state keeps twenty): a robot or a person,
 // what it is, what it was asked, and where it stands.
 function agentsDetail(x: Inputs, on: (id: string) => boolean, glyphs: boolean): Run[][] {
   const all = x.activity?.agents.list ?? []
   if (!all.length || !on('agents.history')) return []
-  return all
-    .filter((a, i) => i >= all.length - 6 || isLive(a.status))
-    .map((a) => {
-      const done = a.status === 'completed' || a.status === 'ended'
-      const failed = a.status === 'failed' || a.status === 'killed'
-      const idle = a.status === 'idle'
-      const [mark, col] = done ? [OK, GOOD] : failed ? [NO, BAD] : idle ? ['◌', undefined] : ['●', WARN]
-      const who = glyphs ? [{ t: a.mate ? G.person : G.model, c: a.mate ? c256(43) : CYAN }, { t: ' ' }] : []
-      return [v(`${mark} `, col), ...who, v(a.mate ? a.name ?? a.type : a.type), d(`  ${a.description}`)]
-    })
+  return all.map((a) => {
+    const done = a.status === 'completed' || a.status === 'ended'
+    const failed = a.status === 'failed' || a.status === 'killed'
+    const idle = a.status === 'idle'
+    const [mark, col] = done ? [OK, GOOD] : failed ? [NO, BAD] : idle ? ['◌', undefined] : ['●', WARN]
+    const who = glyphs ? [{ t: a.mate ? G.person : G.model, c: a.mate ? c256(43) : CYAN }, { t: ' ' }] : []
+    return [v(`${mark} `, col), ...who, v(a.mate ? a.name ?? a.type : a.type), d(`  ${a.description}`)]
+  })
 }
 
 // ── Repo ─────────────────────────────────────────────────────────────────────────────────────────
@@ -574,7 +574,7 @@ const glyphOr = (icon: Icon, glyph: string, fallback: string) => (icon(glyph).le
 // once the total is > 0, and are the first thing dropped when the row runs out of width.
 //
 // Every item with something behind its count is a button: pressing it DRILLS into the item, a
-// scrollable list of what the count is made of drawn under the row (drillLines). The plugin-only
+// scrollable list of what the count is made of drawn under the row (drillDetail). The plugin-only
 // component types (LSP servers, monitors, bin/ executables, channels) were a row of their own,
 // Exts.; they are one item here now, their four counts being zero for most people and the list
 // saying which is which.
@@ -668,33 +668,30 @@ function entryLine(e: Entry, nameW: number, hasTokens: boolean, kindWord: boolea
 }
 
 /**
- * The open drill-down: a header (what it is, how many, what they hold in context, where the
- * window stands, and a pair of page buttons) over `rows` entries from `offset`. The band never
- * scrolls its tree (see the layout invariants), so the list is a window the mod moves itself: by
- * the wheel and the scroll keys (register.tsx's ui.scroll hook) and by the ▲ ▼ buttons.
+ * A drill-down as the Config row's detail: a title (what it is, how many, what they hold in
+ * context), a note about the whole set, and one line per entry. windowDetail shows a window of
+ * the lines and adds the scroll controls to the title.
  */
-export function drillLines(c: Counts | null, id: DrillId, offset: number, rows: number, room: number, glyphs: boolean, on: (id: string) => boolean = () => true): Run[][] {
+export function drillDetail(c: Counts | null, id: DrillId, room: number, glyphs: boolean, on: (id: string) => boolean = () => true): Pick<Section, 'detail' | 'detailHead' | 'detailTail'> {
   const all = drillEntries(c, id, on)
-  if (!all.length || rows < 1) return []
+  if (!all.length) return {}
   const k = DRILLS[id]
-  const from = clampScroll(offset, all.length, rows)
-  const shown = all.slice(from, from + rows)
   const hasTokens = all.some((e) => e.tokens !== undefined)
   const tokens = all.reduce((n, e) => n + (e.tokens ?? 0), 0)
   const head: Run[] = [...(glyphs ? [{ t: k.glyph, c: k.color }, { t: ' ' }] : []), { t: k.label, b: true }, v(` ${all.length}`)]
   if (hasTokens) head.push(d(' · '), v(formatTokens(tokens)), d(' tok'))
-  if (all.length > rows) {
-    const up = from > 0
-    const down = from + rows < all.length
-    head.push(d(`  ${from + 1}–${from + shown.length} `), up ? { t: ' ▲ ', c: 'suggestion', press: 'page:-1' } : d(' ▲ '), down ? { t: ' ▼ ', c: 'suggestion', press: 'page:1' } : d(' ▼ '))
-  }
   const note = c?.notes?.[id]
-  if (note) head.push(d(`  ${note}`))
   // The name column: the longest name in the whole list (so it does not jump while scrolling),
   // within what the line has left after the scope and token columns.
   const fixed = 9 + (hasTokens ? 8 : 0)
   const nameW = Math.max(8, Math.min(Math.max(...all.map((e) => cells(e.name))), 44, room - fixed))
-  return [head, ...shown.map((e) => entryLine(e, nameW, hasTokens, id === 'exts'))].map((l) => truncateRuns(l, room))
+  return { detailHead: head, detailTail: note ? [d(note)] : undefined, detail: all.map((e) => entryLine(e, nameW, hasTokens, id === 'exts')) }
+}
+
+/** A drill-down as drawn: its title line over `rows` entries from `offset`, each within `room`. */
+export function drillLines(c: Counts | null, id: DrillId, offset: number, rows: number, room: number, glyphs: boolean, on: (id: string) => boolean = () => true): Run[][] {
+  const detail = drillDetail(c, id, room, glyphs, on)
+  return detail.detail && rows >= 1 ? windowDetail({ id: 'config', label: 'Config', items: [], ...detail }, offset, rows, room).lines : []
 }
 
 /** The whole list as text, for `/dash config <item>`: one line per entry, grouped by scope. */

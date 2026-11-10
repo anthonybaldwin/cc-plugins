@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { hookEntries, legacyKeys, parseApiUsage, parseChanged, parseGitStatus, parseLastCommit, parseRemote, parseTag } from '../hooks/collect'
-import { DROP_ORDER, ROW_IDS, bar, cells, clampScroll, legendLines, listRows, pace, packSection, plan, runsWidth, stack, stackRuns, stripLabels, type Section } from '../hooks/layout'
+import { DROP_ORDER, ROW_IDS, bar, cells, clampScroll, legendLines, listRows, pace, packSection, plan, runsWidth, stack, stackRuns, stripLabels, windowDetail, type Section } from '../hooks/layout'
 import { editLines, emptyActivity, mergeAgents, recordTool, toolTarget } from '../hooks/register'
 import { buildSections, drillEntries, drillLines, drillText, parseConfig } from '../hooks/sections'
 import type { Counts, Entry } from '../types'
@@ -117,7 +117,7 @@ function engine(on: On, files: Record<string, string> = {}, store: Record<string
   on('process.run', ($, e) => {
     const cmd = e.argv.join(' ')
     if (cmd.startsWith('uname')) return ok('Linux\n')
-    if (cmd.includes('status --porcelain')) return ok('# branch.oid abc\n# branch.head main\n# branch.ab +2 -0\n1 M. N... 100644 100644 100644 a b f\n? new.txt\n')
+    if (cmd.includes('status --porcelain')) return ok(files['git status'] ?? '# branch.oid abc\n# branch.head main\n# branch.ab +2 -0\n1 M. N... 100644 100644 100644 a b f\n? new.txt\n')
     if (cmd.includes('rev-parse')) return ok('/work\n/work/.git\n')
     if (cmd.includes('remote get-url')) return ok('git@github.com:me/work.git\n')
     if (cmd.includes('describe')) return ok('v1.2.0-3-gabc1234\n')
@@ -256,7 +256,7 @@ test('a drill-down lists a window of entries, heaviest first, and never past the
   expect(clampScroll(3, 4, 5)).toBe(0) // a list shorter than its window never moves
   // The page arrows are buttons only where there is somewhere to go.
   const presses = (offset: number) => drillLines(c, 'skills', offset, 5, 80, false)[0]?.flatMap((r) => (r.press ? [r.press] : []))
-  expect([presses(0), presses(10), presses(25)]).toEqual([['page:1'], ['page:-1', 'page:1'], ['page:-1']])
+  expect([presses(0), presses(10), presses(25)]).toEqual([['page:config:1'], ['page:config:-1', 'page:config:1'], ['page:config:-1']])
   for (const room of [12, 25, 40, 80]) for (const l of drillLines(c, 'skills', 7, 5, room, true)) expect(runsWidth(l)).toBeLessThanOrEqual(room)
   // The transcript's copy is the whole list, grouped by scope.
   const all = drillText(c, 'skills')
@@ -301,6 +301,32 @@ test('hooks list one entry per handler, with its matcher and what it runs', () =
   expect(es.slice(0, 2).map((e) => e.note)).toEqual(['kit · sh check.sh', 'kit · prompt'])
   expect([...(es[2]?.note ?? '')].length).toBeLessThanOrEqual(6 + 36)
   expect(hookEntries(null, 'u')).toEqual([])
+})
+
+test('any open row scrolls the detail that does not fit, from where the row says to start', () => {
+  const lines = (n: number) => Array.from({ length: n }, (_, i) => [{ t: `line ${i + 1}` }])
+  const row = (extra: Partial<Section>): Section => ({ id: 'agents', label: 'Agents', items: [{ wide: [{ t: 'x' }], narrow: [{ t: 'x' }] }], ...extra })
+  // All of it fits: no controls, nothing to scroll.
+  expect(text(windowDetail(row({ detail: lines(3) }), undefined, 5, 40).lines)).toEqual(['line 1', 'line 2', 'line 3'])
+  // A history stands at its newest line until scrolled; the controls say where, and page by row id.
+  const end = windowDetail(row({ detail: lines(20), detailAt: 'end' }), undefined, 4, 40)
+  expect(text(end.lines)).toEqual(['17–20 of 20  ▲  ▼ ', 'line 17', 'line 18', 'line 19', 'line 20'])
+  expect([end.base, end.from, end.total, end.rows]).toEqual([16, 16, 20, 4])
+  expect(end.lines[0]?.flatMap((r) => (r.press ? [r.press] : []))).toEqual(['page:agents:-1'])
+  expect(text(windowDetail(row({ detail: lines(20), detailAt: 'end' }), 2, 4, 40).lines)[1]).toBe('line 3')
+  // A list starts where the row points (the todo list's current item), within its ends.
+  expect(windowDetail(row({ detail: lines(20), detailAt: 7 }), undefined, 4, 40).from).toBe(7)
+  expect(windowDetail(row({ detail: lines(20), detailAt: 19 }), undefined, 4, 40).from).toBe(16)
+  for (const room of [6, 14, 40]) for (const l of windowDetail(row({ detail: lines(20) }), 5, 4, room).lines) expect(runsWidth(l)).toBeLessThanOrEqual(room)
+
+  // The rows hand over everything the state holds: every todo, every tool call, every agent.
+  let a = recordTool(emptyActivity(), 'TodoWrite', { todos: Array.from({ length: 9 }, (_, i) => ({ status: i < 5 ? 'completed' : i === 5 ? 'in_progress' : 'pending', content: `todo ${i}` })) })
+  for (let i = 0; i < 7; i++) a = recordTool(a, 'Read', { file_path: `/x/f${i}.md` })
+  a = { ...a, agents: { ...a.agents, running: 1, list: Array.from({ length: 12 }, (_, i) => ({ id: `a${i}`, type: 'Explore', description: `task ${i}`, status: i === 11 ? 'running' : 'completed' })) } }
+  const built = buildSections({ activity: a, now: 0 } as never, parseConfig({ rows: ['activity', 'agents'] }), false)
+  const [act, ag] = [built.find((s) => s.id === 'activity'), built.find((s) => s.id === 'agents')]
+  expect([act?.detail?.length, act?.detailAt]).toEqual([9 + 7 + 1, 4]) // TodoWrite's own call is a tool line too; the window starts at the last done todo
+  expect([ag?.detail?.length, ag?.detailAt]).toEqual([12, 'end'])
 })
 
 // ── parsers and bookkeeping ──────────────────────────────────────────────────────────────────────
@@ -519,11 +545,11 @@ test('pressing a Config item opens its list under the row; the wheel and the pag
   expect(await wheel(2)).toEqual({})
   expect(await has(/^skill-11/)).toBe(false)
   expect(await has(/^skill-05/)).toBe(true)
-  await ui.press({ key: 'item:page:1' })
+  await ui.press({ key: 'item:page:config:1' })
   expect(await has(/^skill-00/)).toBe(true) // a page on: the last full window, 04 … 00
   await wheel(50)
   expect(await has(/^skill-04/)).toBe(true) // and it stops there
-  await ui.press({ key: 'item:page:-1' })
+  await ui.press({ key: 'item:page:config:-1' })
   expect(await has(/^skill-09/)).toBe(true)
   // Another item swaps the list; the same one again closes it, the row staying open.
   await ui.press({ key: 'item:drill:instructions' })
@@ -576,4 +602,31 @@ test('the lists come from what is on disk and in settings: commands, rules, hook
   expect(exts).toMatch(/^Plugin components: 3/)
   for (const line of ['kit-cli  (bin · kit)', 'slack  (channel · kit)', 'typescript  (LSP · kit)']) expect(exts).toContain(line)
   expect(await list('themes')).toBe('Themes: none.')
+})
+
+test('an open Repo row scrolls its changed files; closing the row puts the window back', async ($, on) => {
+  const status = '# branch.oid abc\n# branch.head main\n' + Array.from({ length: 30 }, (_, i) => `? file-${String(i).padStart(2, '0')}.txt`).join('\n') + '\n'
+  const clock = engine(on, { 'git status': status })
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await clock.settle()
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  const has = async (t: string | RegExp) => (await ui.find({ type: 'Text', text: t })) !== undefined
+  const wheel = (by: number) => $.ui.scroll({ component: 'AbovePrompt', requestId: 'band', offset: 0, by, bodyRows: 11, contentRows: 12, origin: { kind: 'person' } } as never)
+  // Closed, there is nothing of the band to scroll.
+  expect(await wheel(1)).toEqual({ deny: 'the engine has no rows to scroll' })
+  await ui.press({ key: 'row:repo' })
+  expect(await has('1–5 of 30 ')).toBe(true)
+  expect([await has('file-00.txt'), await has('file-05.txt')]).toEqual([true, false])
+  expect(await wheel(3)).toEqual({})
+  expect([await has('file-02.txt'), await has('file-03.txt'), await has('file-07.txt')]).toEqual([false, true, true])
+  await ui.press({ key: 'item:page:repo:1' })
+  expect(await has('file-12.txt')).toBe(true)
+  await wheel(99)
+  expect(await has('26–30 of 30 ')).toBe(true)
+  // Closed and opened again, it starts from the top.
+  await ui.press({ key: 'row:repo' })
+  await ui.press({ key: 'row:repo' })
+  expect(await has('1–5 of 30 ')).toBe(true)
+  await ui.unmount()
 })

@@ -74,4 +74,5 @@ Opening and closing rows doesn't need the file: the user clicks a row's label, o
 `/dash <row>`, `/dash open all`, `/dash close all`. `/dash` alone hides or shows the whole dashboard.
 A Config item's list (what its count is made of) opens with a click on the item or
 `/dash config <item>` (`skills`, `mcp`, `hooks`, `plugins`, `exts`, …), which also prints the whole
-list; none of that needs the file either.
+list; none of that needs the file either. An open row's detail that has more than fits scrolls
+under the mouse wheel or its `▲` `▼`.

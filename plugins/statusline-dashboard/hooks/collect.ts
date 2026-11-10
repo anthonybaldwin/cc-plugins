@@ -204,8 +204,8 @@ export function parseGitStatus(out: string) {
   return { branch, ahead, behind, staged, modified, untracked, conflicts }
 }
 
-/** The changed paths in porcelain v2 output, first few kept: `M.` staged, `.M` modified, `??` untracked, `UU` conflict. */
-export function parseChanged(out: string, keep = 5): { files: Array<{ xy: string; path: string }>; changedTotal: number } {
+/** The changed paths in porcelain v2 output, the first `keep` kept (the open Repo row scrolls them): `M.` staged, `.M` modified, `??` untracked, `UU` conflict. */
+export function parseChanged(out: string, keep = 50): { files: Array<{ xy: string; path: string }>; changedTotal: number } {
   const files: Array<{ xy: string; path: string }> = []
   for (const line of out.split('\n')) {
     const f = line.split(' ')
