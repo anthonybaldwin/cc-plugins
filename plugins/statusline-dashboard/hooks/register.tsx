@@ -94,7 +94,7 @@ async function loadView($: EngineInterface): Promise<void> {
     isVisible: saved?.isVisible !== false,
     expanded: Array.isArray(saved?.expanded) ? saved.expanded.filter((id) => (ROW_IDS as readonly string[]).includes(id)) : cfg.expanded,
     ...(isDrill(saved?.drill) ? { drill: saved.drill } : {}),
-    ...(saved?.pick === 'model' || saved?.pick === 'effort' ? { pick: saved.pick } : {}),
+    ...(saved?.pick === 'effort' ? { pick: saved.pick } : {}),
   }
   await update($, view, () => v)
 }
@@ -139,21 +139,31 @@ async function refreshControls($: EngineInterface): Promise<void> {
 }
 
 /**
- * Opens one of the Model row's pickers under the row (the row opens with it, as the newest open
- * one), swaps it for the other, or closes it when it is the one already showing. With no list of
- * models to draw (a build whose /config has no model row), the model name opens Claude Code's own
- * /model picker instead.
+ * Opens Claude Code's own /model picker, as if the person typed the command: it has the models
+ * this account is offered, by version, and the consent steps some need, none of which a mod can
+ * list or stand in for. Where a plugin may not run it now, the command is put in the prompt box
+ * for the person's Enter.
  */
-async function togglePick($: EngineInterface, what: 'model' | 'effort'): Promise<void> {
-  if (what === 'model' && !(await read($, controls))?.model?.options.length) {
-    await $.command.run({ command: 'model' }).catch(() => $.ui.toast('Run /model to pick a model'))
-    return
+async function openModelPicker($: EngineInterface): Promise<void> {
+  try {
+    await $.command.run({ command: 'model' })
+  } catch {
+    await $.prompt.fill({ text: '/model' }).catch(() => undefined)
+    $.ui.toast('Press Enter to open /model')
   }
+  await refreshBreakdown($)
+}
+
+/**
+ * Opens the effort picker under the Model row (the row opens with it, as the newest open one), or
+ * closes it when it is already showing.
+ */
+async function togglePick($: EngineInterface): Promise<void> {
   await unscroll($, 'model')
   await saveView($, (v) => {
     const { pick: was, ...rest } = v
-    if (was === what && v.expanded.includes('model')) return rest
-    return { ...rest, isVisible: true, pick: what, expanded: [...v.expanded.filter((x) => x !== 'model'), 'model'] }
+    if (was === 'effort' && v.expanded.includes('model')) return rest
+    return { ...rest, isVisible: true, pick: 'effort', expanded: [...v.expanded.filter((x) => x !== 'model'), 'model'] }
   })
 }
 
@@ -162,22 +172,6 @@ async function closePick($: EngineInterface): Promise<void> {
     const { pick: _closed, ...rest } = v
     return rest
   })
-}
-
-/**
- * Switches the model as the /config menu would (`$.config.set`, which says why when it can't: a
- * managed setting, a model that needs a consent only its dialog gives); where the menu refuses a
- * plugin's change outright, `/model <name>` is run instead, as if typed.
- */
-async function setModel($: EngineInterface, value: string): Promise<void> {
-  await closePick($)
-  const res = await $.config.set({ key: 'model', value }).catch((e) => ({ deny: String(e) }))
-  if (res.deny !== undefined) {
-    const reason = res.deny
-    await $.command.run({ command: 'model', args: value }).catch(() => $.ui.toast(`Model not changed: ${reason}`))
-  }
-  await refreshBreakdown($)
-  await refreshControls($)
 }
 
 /**
@@ -199,6 +193,12 @@ async function setEffort($: EngineInterface, level: string): Promise<void> {
 async function toggleThinking($: EngineInterface): Promise<void> {
   const m = await read($, model)
   if (!m) return
+  // The engine locks the row for a model that can't turn thinking off, and for a managed setting.
+  await refreshControls($)
+  if ((await read($, controls))?.thinking?.locked) {
+    $.ui.toast(`Thinking is locked ${m.thinking ? 'on' : 'off'}: this model can't change it, or a managed setting owns it`)
+    return
+  }
   const value = !m.thinking
   const res = await $.config.set({ key: 'thinking', value }).catch((e) => ({ deny: String(e) }))
   if (res.deny !== undefined) {
@@ -225,18 +225,17 @@ async function scrollRow($: EngineInterface, id: RowId, by: number): Promise<voi
 
 /**
  * What a pressed run does: `drill:<item>` opens that Config item's list, `page:<row>:±1` turns
- * that row's detail a page, `pick:model|effort` opens a Model row picker, `set:model|effort:<v>`
- * takes a choice from it, `toggle:thinking` flips the lamp.
+ * that row's detail a page, `open:model` opens /model, `pick:effort` opens the effort picker,
+ * `set:effort:<level>` takes a level from it, `toggle:thinking` flips the lamp.
  */
 async function press($: EngineInterface, word: string): Promise<void> {
-  const [verb, arg = '', ...more] = word.split(':')
-  const dir = more.join(':') // a model id may hold a colon of its own
+  const [verb, arg = '', value = ''] = word.split(':')
   if (verb === 'drill' && isDrill(arg)) await toggleDrill($, arg)
-  else if (verb === 'pick' && (arg === 'model' || arg === 'effort')) await togglePick($, arg)
-  else if (verb === 'set' && arg === 'model') await setModel($, dir)
-  else if (verb === 'set' && arg === 'effort') await setEffort($, dir)
+  else if (verb === 'open' && arg === 'model') await openModelPicker($)
+  else if (verb === 'pick' && arg === 'effort') await togglePick($)
+  else if (verb === 'set' && arg === 'effort') await setEffort($, value)
   else if (verb === 'toggle' && arg === 'thinking') await toggleThinking($)
-  else if (verb === 'page') await scrollRow($, arg as RowId, Number(dir) * (drawn.rows[arg as RowId]?.rows ?? 1))
+  else if (verb === 'page') await scrollRow($, arg as RowId, Number(value) * (drawn.rows[arg as RowId]?.rows ?? 1))
 }
 
 async function refreshUsage($: EngineInterface): Promise<void> {

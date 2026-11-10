@@ -93,14 +93,14 @@ key must be declared in `types/index.d.ts`.
   **Adding an item** = an entry list in `collectCounts`, a `DRILLS` entry, its `Counts` field, the
   README's item table and the configure skill. Exts. was a row until 2.1 and is the `exts` item
   now; its `exts.*` hide ids and a bare `exts` still work.
-- **Model row controls.** The name, the effort and the lamp are Buttons: `pick:model` /
-  `pick:effort` open a picker as the row's detail (in place of the context breakdown; `View.pick`),
-  `set:model:<id>` / `set:effort:<level>` take a choice, `toggle:thinking` flips the lamp. The
-  model list and the thinking state come from Claude Code's own `/config` rows (`$.config.list()`,
-  keys `model` and `thinking`, kept in the `controls` atom) and are changed with `$.config.set`,
-  falling back to `$.command.run({ command: 'model' })` when the menu refuses. Effort is no
-  `/config` row: it is set by running `/effort <level>`. A change the engine refuses is toasted,
-  never swallowed.
+- **Model row controls.** The name, the effort and the lamp are Buttons. `open:model` runs
+  `/model` (`$.command.run`): no API lists the versioned models that picker offers, and the
+  `/config` `model` row's options are only the aliases, so don't draw a model list. `pick:effort`
+  opens the levels as the row's detail (in place of the context breakdown; `View.pick`),
+  `set:effort:<level>` runs `/effort <level>` (effort is no `/config` row). `toggle:thinking`
+  flips the `/config` row `thinking` with `$.config.set`; that row is locked on models that can't
+  turn thinking off (Fable), so the lamp stays a button and a locked press toasts why. A change
+  the engine refuses is toasted, never swallowed.
 - **Adding a row** = a builder in `sections.ts`, an id in `ROW_IDS` and `DROP_ORDER`, the README
   row list and table, and the configure skill.
 - Glyphs only on the `terminal` surface (desktop has no Nerd Font); semantic colors are theme

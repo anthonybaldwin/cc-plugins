@@ -259,13 +259,13 @@ test('a drill-down lists a window of entries, heaviest first, and never past the
   expect(drillEntries(c, 'skills').slice(0, 2).map((e) => e.name)).toEqual(['skill-29', 'skill-28'])
   const top = text(drillLines(c, 'skills', 0, 5, 80, false))
   expect(top.length).toBe(6) // the header and five entries
-  expect(top[0]).toMatch(/^Skills 30 · 4\.3K tok {2}1–5 /)
+  expect(top[0]).toMatch(/^Skills 30 · 4\.3K tok {2}1–5 of 30 /)
   expect(top[0]).toMatch(/28 of 30 fit/)
   expect(top[1]).toMatch(/^skill-29 +plugin +290 {2}kit$/)
   // Scrolled: the window moves, and stops at the last full one however far it is asked to go.
   expect(text(drillLines(c, 'skills', 3, 5, 80, false))[1]).toMatch(/^skill-26/)
   const end = text(drillLines(c, 'skills', 999, 5, 80, false))
-  expect(end[0]).toMatch(/26–30/)
+  expect(end[0]).toMatch(/26–30 of 30/)
   expect(end[5]).toMatch(/^skill-00 +user +0$/)
   expect(clampScroll(-4, 30, 5)).toBe(0)
   expect(clampScroll(99, 30, 5)).toBe(25)
@@ -647,53 +647,42 @@ test('an open Repo row scrolls its changed files; closing the row puts the windo
   await ui.unmount()
 })
 
-test('the Model row: the name picks a model, the effort a level, the lamp toggles thinking', async ($, on) => {
-  const engineRow = { provider: { plugin: 'engine', tier: 'core' }, isLocked: false }
-  const menu: Menu = {
-    rows: [
-      { key: 'model', label: 'Model', kind: 'choice', value: 'Default (recommended)', options: ['default', 'opus', 'sonnet', 'haiku'], ...engineRow },
-      { key: 'thinking', label: 'Thinking mode', kind: 'boolean', value: true, ...engineRow },
-    ],
-  }
-  const store: Record<string, unknown> = {}
-  const clock = engine(on, {}, store, undefined, {}, { menu })
+test('the Model row: the name opens /model, the lamp toggles thinking', async ($, on) => {
+  const menu: Menu = { rows: [{ key: 'thinking', label: 'Thinking mode', kind: 'boolean', value: true, provider: { plugin: 'engine', tier: 'core' }, isLocked: false }] }
+  const clock = engine(on, {}, {}, undefined, {}, { menu })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await clock.settle()
 
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  const has = async (t: string | RegExp) => (await ui.find({ type: 'Text', text: t })) !== undefined
-  // The name opens the models the menu offers, the one in use marked; the row opens with it.
-  await ui.press({ key: 'item:pick:model' })
-  expect(store.view).toEqual({ isVisible: true, expanded: ['model'], pick: 'model' })
-  expect([await has('● '), await has('sonnet'), await has('Messages 30%')]).toEqual([true, true, false])
-  await ui.press({ key: 'item:set:model:sonnet' })
-  expect(menu.set).toEqual([['model', 'sonnet']])
-  expect(store.view).toEqual({ isVisible: true, expanded: ['model'] }) // picked: the list closes, the breakdown is back
-  expect(await has('Messages 30%')).toBe(true)
-  // The lamp flips thinking through the menu's own row.
+  // No API lists the models /model offers, so the name runs the command itself.
+  await ui.press({ key: 'item:open:model' })
+  expect(menu.ran).toEqual(['/model'])
+  // The lamp flips thinking through the menu's own row; a refusal changes nothing.
   await ui.press({ key: 'item:toggle:thinking' })
   await ui.press({ key: 'item:toggle:thinking' })
-  expect(menu.set?.slice(1)).toEqual([['thinking', false], ['thinking', true]])
-  // What the menu refuses for the model goes to /model, as if typed.
-  menu.deny = { model: 'only its dialog changes it' }
-  await ui.press({ key: 'item:pick:model' })
-  await ui.press({ key: 'item:set:model:opus' })
-  expect(menu.ran).toEqual(['/model opus'])
+  expect(menu.set).toEqual([['thinking', false], ['thinking', true]])
+  menu.deny = { thinking: "can't be turned off for this model" }
+  await ui.press({ key: 'item:toggle:thinking' })
+  expect(menu.set?.length).toBe(2)
+  // Locked (Fable can't turn thinking off): the press is answered with why, and sets nothing.
+  menu.deny = {}
+  if (menu.rows?.[0]) menu.rows[0].isLocked = true
+  await ui.press({ key: 'item:toggle:thinking' })
+  expect(menu.set?.length).toBe(2)
   await ui.unmount()
 })
 
-test('the effort picker runs /effort and shows the level at once; a locked lamp is no button', () => {
+test('the effort picker lists the levels and thinking; the lamp is a button even when locked', () => {
   const x = (controls: unknown) => ({ model: { name: 'Opus 4.7', effort: 'medium', thinking: false, fast: false }, controls, now: 0 }) as never
   const row = (controls: unknown, pick?: string) => buildSections(x(controls), parseConfig({ rows: ['model'] }), true, 80, undefined, pick).find((s) => s.id === 'model')
   const words = (controls: unknown) => [...new Set(row(controls)?.items.flatMap((it) => it.wide.flatMap((r) => (r.press ? [r.press] : []))))]
   // Off, the lamp still shows (dim), or there would be nothing to press to turn it on.
-  expect(words({ thinking: { value: false, locked: false } })).toEqual(['pick:model', 'pick:effort', 'toggle:thinking'])
-  expect(words({ thinking: { value: false, locked: true } })).toEqual(['pick:model', 'pick:effort'])
+  expect(words({ thinking: { value: false, locked: false } })).toEqual(['open:model', 'pick:effort', 'toggle:thinking'])
+  expect(words({ thinking: { value: false, locked: true } })).toEqual(['open:model', 'pick:effort', 'toggle:thinking'])
   const picker = row({}, 'effort')
-  expect(text(picker?.detail ?? [])).toEqual(['○ low', '● medium', '○ high', '○ xhigh', '○ max'])
+  expect(text(picker?.detail ?? [])).toEqual(['○ low', '● medium', '○ high', '○ xhigh', '○ max', '○ thinking off  click to turn on'])
+  expect(text(row({ thinking: { value: false, locked: true } }, 'effort')?.detail ?? [])[5]).toBe('○ thinking off  locked for this model')
   expect(picker?.detail?.[2]?.every((r) => r.press === 'set:effort:high')).toBe(true)
-  // No models to list: no picker detail, and the name's press opens Claude Code's own /model.
-  expect(row({}, 'model')?.detail).toBeUndefined()
 })
 
 test('picking an effort runs /effort as if typed', async ($, on) => {
@@ -711,8 +700,5 @@ test('picking an effort runs /effort as if typed', async ($, on) => {
   await ui.press({ key: 'item:set:effort:high' })
   expect(menu.ran).toEqual(['/effort high'])
   expect(await ui.find({ type: 'Text', text: /high/ })).toBeDefined()
-  // With no model row in the menu, the name opens the built-in picker.
-  await ui.press({ key: 'item:pick:model' })
-  expect(menu.ran).toEqual(['/effort high', '/model'])
   await ui.unmount()
 })

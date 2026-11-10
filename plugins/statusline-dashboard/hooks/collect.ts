@@ -379,19 +379,14 @@ export async function collectInfo($: $, home: string): Promise<Info> {
 }
 
 /**
- * The `/config` rows the Model row's pickers act on. The model row lists the models this account
- * is offered (the same set `/config model=…` takes); a build whose menu has no such row answers
- * nothing, and the row falls back to opening Claude Code's own /model picker.
+ * The `/config` row the Model row's lamp acts on. (The menu has a `model` row too, but its options
+ * are the aliases `/config model=…` takes — `sonnet`, `opus[1m]`, `opusplan` — not the versioned
+ * list /model shows, and nothing else lists those: the model name opens /model itself instead.)
  */
 export async function collectControls($: $): Promise<Controls | null> {
   try {
-    const rows = await $.config.list()
-    const model = rows.find((r) => r.key === 'model')
-    const thinking = rows.find((r) => r.key === 'thinking')
-    return {
-      ...(model ? { model: { value: String(model.value), options: [...(model.options ?? [])], locked: model.isLocked } } : {}),
-      ...(thinking && typeof thinking.value === 'boolean' ? { thinking: { value: thinking.value, locked: thinking.isLocked } } : {}),
-    }
+    const thinking = (await $.config.list()).find((r) => r.key === 'thinking')
+    return thinking && typeof thinking.value === 'boolean' ? { thinking: { value: thinking.value, locked: thinking.isLocked } } : {}
   } catch {
     return null
   }

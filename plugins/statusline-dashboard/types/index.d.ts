@@ -81,12 +81,11 @@ export type Model = {
 }
 
 /**
- * What the Model row can change, as Claude Code's own `/config` menu holds it (`$.config.list()`):
- * the model row's current value and the models it offers, and whether thinking is on. `locked`
- * when a managed setting owns the row, so a change would be refused.
+ * What the Model row's lamp acts on, as Claude Code's own `/config` menu holds it
+ * (`$.config.list()`): whether thinking is on, and `locked` when a managed setting owns the row,
+ * so a change would be refused.
  */
 export type Controls = {
-  model?: { value: string; options: string[]; locked: boolean }
   thinking?: { value: boolean; locked: boolean }
 }
 
@@ -206,10 +205,10 @@ export type Activity = {
 
 /**
  * The person's view of the band: shown or not, which rows are open (oldest first), and which
- * Config item is drilled into (its list drawn under the row), and which of the Model row's
- * pickers is open (the models or the effort levels, listed under that row).
+ * Config item is drilled into (its list drawn under the row), and whether the Model row's effort
+ * picker is open (the levels, listed under that row).
  */
-export type View = { isVisible: boolean; expanded: string[]; drill?: string; pick?: 'model' | 'effort' }
+export type View = { isVisible: boolean; expanded: string[]; drill?: string; pick?: 'effort' }
 
 declare module 'claude-code' {
   interface PluginState {
