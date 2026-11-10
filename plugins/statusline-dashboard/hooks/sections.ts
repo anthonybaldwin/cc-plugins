@@ -186,11 +186,11 @@ const d = (t: string): Run => ({ t, d: true })
  * Builds every row. `room` is the cells an open row's detail lines get (past the toggle and
  * label); each detail line is cut to it.
  */
-export function buildSections(x: Inputs, cfg: Config, glyphs: boolean, room = 80, drill?: string, pick?: string): Section[] {
+export function buildSections(x: Inputs, cfg: Config, glyphs: boolean, room = 80, drill?: string): Section[] {
   const on = (id: string) => !cfg.hide.has(id)
   const icon: Icon = (glyph, color) => (glyphs ? [{ t: glyph, c: color }, { t: ' ' }] : [])
   const build: Record<RowId, () => Section> = {
-    model: () => modelRow(x, cfg, on, icon, pick),
+    model: () => modelRow(x, cfg, on, icon),
     limits: () => limitsRow(x, cfg, on, icon),
     usage: () => usageRow(x, on, icon),
     turn: () => turnRow(x, on, icon),
@@ -204,7 +204,6 @@ export function buildSections(x: Inputs, cfg: Config, glyphs: boolean, room = 80
   // Each open row's detail in full, and where its window stands until scrolled: the histories
   // (turns, agents) at their newest line, the todo list around the current item.
   const details: Partial<Record<RowId, () => Pick<Section, 'detail' | 'detailAt' | 'detailHead' | 'detailTail'>>> = {
-    model: () => pickDetail(x, pick, on),
     turn: () => ({ detail: turnDetail(x, on), detailAt: 'end' }),
     activity: () => activityDetail(x, on),
     agents: () => ({ detail: agentsDetail(x, on, glyphs), detailAt: 'end' }),
@@ -216,26 +215,6 @@ export function buildSections(x: Inputs, cfg: Config, glyphs: boolean, room = 80
     const extra = s.items.length ? details[id]?.() : undefined
     return extra?.detail?.length ? { ...s, ...extra } : s
   })
-}
-
-/** The effort levels /effort takes, lowest first. */
-export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
-
-/**
- * The open effort picker as the Model row's detail, in place of the context breakdown: one line
- * per level, each a button (`set:effort:<level>`), the one in use marked, then thinking's switch.
- */
-function pickDetail(x: Inputs, pick: string | undefined, on: (id: string) => boolean): Pick<Section, 'detail' | 'detailAt' | 'detailHead' | 'detailTail'> {
-  const m = x.model
-  if (!m || pick !== 'effort') return {}
-  const line = (e: string): Run[] => [v(e === m.effort ? '● ' : '○ ', e === m.effort ? GOOD : undefined), e === m.effort ? { t: e, b: true } : v(e)].map((r) => ({ ...r, press: `set:effort:${e}` }))
-  // Thinking sits under the levels too: the lamp in the row is one glyph, easy to miss as a button.
-  const locked = x.controls?.thinking?.locked === true
-  const hint = locked ? '  locked for this model' : m.thinking ? '  click to turn off' : '  click to turn on'
-  const thinking: Run[][] = on('model.thinking')
-    ? [[v(m.thinking ? '● ' : '○ ', m.thinking ? GOOD : undefined), v('thinking '), m.thinking ? { t: 'on', b: true } : d('off'), d(hint)].map((r) => ({ ...r, press: 'toggle:thinking:list' }))]
-    : []
-  return { detailHead: [{ t: 'Effort', b: true }], detailTail: [d('click a level to set it')], detail: [...EFFORTS.map(line), ...thinking] }
 }
 
 // ── open-row detail: the history a closed row has no room for ──────────────────────────────────
@@ -368,20 +347,21 @@ export function effortRuns(level: string, icon: Icon): Run[] {
   }
 }
 
-// The row's three controls are buttons (`Run.press`): the model name opens Claude Code's own
-// /model picker (`open:model`; no API lists the models it offers), the effort its levels (`pick:effort`), and the lamp turns thinking on or off
-// where it stands (`toggle:thinking`) — so the lamp shows dim while thinking is off, where it
-// used to show only while on, or there would be nothing to press to turn it back on.
-function modelRow(x: Inputs, cfg: Config, on: (id: string) => boolean, icon: Icon, pick?: string): Section {
+// The row's three controls are buttons (`Run.press`). The model name and the effort open Claude
+// Code's own pickers (`open:model`, `open:effort`): no API lists the models it offers, and its
+// effort picker knows which levels the model takes. The lamp turns thinking on or off where it
+// stands (`toggle:thinking`) — so it shows dim while thinking is off, where it used to show only
+// while on, or there would be nothing to press to turn it back on.
+function modelRow(x: Inputs, cfg: Config, on: (id: string) => boolean, icon: Icon): Section {
   const items: Item[] = []
   const m = x.model
-  const button = (runs: Run[], word: string, open = false): Run[] => runs.map((r) => ({ ...r, press: word, ...(open ? { u: true } : {}) }))
+  const button = (runs: Run[], word: string): Run[] => runs.map((r) => ({ ...r, press: word }))
   if (m) items.push(plain([...button([...icon(G.model, CYAN), { t: m.name, b: true }], 'open:model'), ...(m.fast ? [v(' '), ...icon(G.speed, WARN)] : [])]))
   // Always a button, dim while off. Where the engine locks the setting (a model that can't turn
   // thinking off, a managed setting) the press says so: a lamp that just ignores clicks reads as broken.
   const lamp: Run[] = m && on('model.thinking') ? icon(G.think, m.thinking ? c256(183) : undefined).map((r, i) => (i === 0 && !m.thinking ? { ...r, d: true } : r)) : []
   const think = button(lamp, 'toggle:thinking')
-  if (m?.effort && on('model.effort')) items.push(plain([...button(effortRuns(m.effort, icon), 'pick:effort', pick === 'effort'), ...(think.length ? [v(' '), ...think] : [])]))
+  if (m?.effort && on('model.effort')) items.push(plain([...button(effortRuns(m.effort, icon), 'open:effort'), ...(think.length ? [v(' '), ...think] : [])]))
   else if (think.length) items.push(plain(think))
   const u = x.usage
   if (u && on('model.context')) {

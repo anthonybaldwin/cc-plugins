@@ -677,20 +677,17 @@ test('the Model row: the name opens /model, the lamp toggles thinking', async ($
   await ui.unmount()
 })
 
-test('the effort picker lists the levels and thinking; the lamp is a button even when locked', () => {
+test('the lamp is a button even when locked, and dim while off', () => {
   const x = (controls: unknown) => ({ model: { name: 'Opus 4.7', effort: 'medium', thinking: false, fast: false }, controls, now: 0 }) as never
-  const row = (controls: unknown, pick?: string) => buildSections(x(controls), parseConfig({ rows: ['model'] }), true, 80, undefined, pick).find((s) => s.id === 'model')
+  const row = (controls: unknown) => buildSections(x(controls), parseConfig({ rows: ['model'] }), true).find((s) => s.id === 'model')
   const words = (controls: unknown) => [...new Set(row(controls)?.items.flatMap((it) => it.wide.flatMap((r) => (r.press ? [r.press] : []))))]
-  // Off, the lamp still shows (dim), or there would be nothing to press to turn it on.
-  expect(words({ thinking: { value: false, locked: false } })).toEqual(['open:model', 'pick:effort', 'toggle:thinking'])
-  expect(words({ thinking: { value: false, locked: true } })).toEqual(['open:model', 'pick:effort', 'toggle:thinking'])
-  const picker = row({}, 'effort')
-  expect(text(picker?.detail ?? [])).toEqual(['○ low', '● medium', '○ high', '○ xhigh', '○ max', '○ thinking off  click to turn on'])
-  expect(text(row({ thinking: { value: false, locked: true } }, 'effort')?.detail ?? [])[5]).toBe('○ thinking off  locked for this model')
-  expect(picker?.detail?.[2]?.every((r) => r.press === 'set:effort:high')).toBe(true)
+  expect(words({ thinking: { value: false, locked: false } })).toEqual(['open:model', 'open:effort', 'toggle:thinking'])
+  expect(words({ thinking: { value: false, locked: true } })).toEqual(['open:model', 'open:effort', 'toggle:thinking'])
+  expect(row({})?.items.flatMap((it) => it.wide).find((r) => r.press === 'toggle:thinking')?.d).toBe(true)
+  expect(row({})?.detail).toBeUndefined()
 })
 
-test('picking an effort runs /effort as if typed', async ($, on) => {
+test('the effort opens /effort, and the row shows the saved level at once', async ($, on) => {
   const menu: Menu = {}
   const clock = engine(on, {}, {}, undefined, {}, { menu })
   on('turn.step', async function* ($, e) {
@@ -701,9 +698,7 @@ test('picking an effort runs /effort as if typed', async ($, on) => {
   // The effort shows once a model request has reported one.
   for await (const _ of $.turn.step({ turnId: 't1', index: 0, messageCount: 1, model: 'opus', effort: 'medium' } as never) as never as AsyncIterable<unknown>) void _
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  await ui.press({ key: 'item:pick:effort' })
-  await ui.press({ key: 'item:set:effort:high' })
-  expect(menu.ran).toEqual(['/effort high'])
-  expect(await ui.find({ type: 'Text', text: /high/ })).toBeDefined()
+  await ui.press({ key: 'item:open:effort' })
+  expect(menu.ran).toEqual(['/effort'])
   await ui.unmount()
 })

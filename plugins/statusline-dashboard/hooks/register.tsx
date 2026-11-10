@@ -36,7 +36,7 @@ import {
   removeLegacy,
 } from './collect'
 import { ROW_IDS, SECTION_WIDTH, clampScroll, legendLines, listRows, packSection, plan, stackRuns, stripLabels, truncate, windowDetail, type DetailWindow, type Line, type RowId, type Run } from './layout'
-import { DRILLS, EFFORTS, buildSections, drillEntries, drillText, isDrill, parseConfig, type DrillId } from './sections'
+import { DRILLS, buildSections, drillEntries, drillText, isDrill, parseConfig, type DrillId } from './sections'
 
 const usage = atom({ plugin: 'statusline-dashboard', key: 'usage' } as const, null)
 const breakdown = atom({ plugin: 'statusline-dashboard', key: 'breakdown' } as const, null)
@@ -98,7 +98,6 @@ async function loadView($: EngineInterface): Promise<void> {
     isVisible: saved?.isVisible !== false,
     expanded: Array.isArray(saved?.expanded) ? saved.expanded.filter((id) => (ROW_IDS as readonly string[]).includes(id)) : cfg.expanded,
     ...(isDrill(saved?.drill) ? { drill: saved.drill } : {}),
-    ...(saved?.pick === 'effort' ? { pick: saved.pick } : {}),
   }
   await update($, view, () => v)
 }
@@ -154,55 +153,24 @@ async function refreshControls($: EngineInterface): Promise<void> {
 }
 
 /**
- * Opens Claude Code's own /model picker, as if the person typed the command: it has the models
- * this account is offered, by version, and the consent steps some need, none of which a mod can
- * list or stand in for. Where a plugin may not run it now, the command is put in the prompt box
- * for the person's Enter.
+ * Opens one of Claude Code's own pickers, /model or /effort, as if the person typed the command.
+ * /model has the models this account is offered, by version, and the consent steps some need;
+ * /effort knows the levels the model takes. A mod can list neither. Where a plugin may not run
+ * the command now, it is put in the prompt box for the person's Enter.
  */
-async function openModelPicker($: EngineInterface): Promise<void> {
+async function openPicker($: EngineInterface, command: 'model' | 'effort'): Promise<void> {
   try {
-    await $.command.run({ command: 'model' })
+    await $.command.run({ command })
   } catch {
-    await $.prompt.fill({ text: '/model' }).catch(() => undefined)
-    await say($, 'Press Enter to open /model')
+    await $.prompt.fill({ text: `/${command}` }).catch(() => undefined)
+    await say($, `Press Enter to open /${command}`)
+    return
   }
   await refreshBreakdown($)
-}
-
-/**
- * Opens the effort picker under the Model row (the row opens with it, as the newest open one), or
- * closes it when it is already showing.
- */
-async function togglePick($: EngineInterface): Promise<void> {
-  await unscroll($, 'model')
-  await saveView($, (v) => {
-    const { pick: was, ...rest } = v
-    if (was === 'effort' && v.expanded.includes('model')) return rest
-    return { ...rest, isVisible: true, pick: 'effort', expanded: [...v.expanded.filter((x) => x !== 'model'), 'model'] }
-  })
-}
-
-async function closePick($: EngineInterface): Promise<void> {
-  await saveView($, (v) => {
-    const { pick: _closed, ...rest } = v
-    return rest
-  })
-}
-
-/**
- * Sets the effort by running `/effort <level>` as if typed: effort is no /config row, and the
- * command is what checks the level against the model. The row shows the level at once; the next
- * model request's own word (turn.step) corrects it if the model settled on another.
- */
-async function setEffort($: EngineInterface, level: string): Promise<void> {
-  await closePick($)
-  if (!(EFFORTS as readonly string[]).includes(level)) return
-  try {
-    await $.command.run({ command: 'effort', args: level })
-    await update($, model, (m) => (m ? { ...m, effort: level } : m))
-  } catch (e) {
-    await say($, `Effort not changed: ${String(e)}`)
-  }
+  // The picked effort is saved as a setting; the row shows it now rather than at the next model
+  // request, whose own word (turn.step) corrects it if the model settled on another.
+  const level = await $.settings.read({ key: 'effortLevel' }).catch(() => undefined)
+  if (command === 'effort' && typeof level === 'string') await update($, model, (m) => (m ? { ...m, effort: level } : m))
 }
 
 async function toggleThinking($: EngineInterface): Promise<void> {
@@ -240,15 +208,12 @@ async function scrollRow($: EngineInterface, id: RowId, by: number): Promise<voi
 
 /**
  * What a pressed run does: `drill:<item>` opens that Config item's list, `page:<row>:±1` turns
- * that row's detail a page, `open:model` opens /model, `pick:effort` opens the effort picker,
- * `set:effort:<level>` takes a level from it, `toggle:thinking` flips the lamp.
+ * that row's detail a page, `open:model|effort` opens that picker, `toggle:thinking` flips the lamp.
  */
 async function press($: EngineInterface, word: string): Promise<void> {
   const [verb, arg = '', value = ''] = word.split(':')
   if (verb === 'drill' && isDrill(arg)) await toggleDrill($, arg)
-  else if (verb === 'open' && arg === 'model') await openModelPicker($)
-  else if (verb === 'pick' && arg === 'effort') await togglePick($)
-  else if (verb === 'set' && arg === 'effort') await setEffort($, value)
+  else if (verb === 'open' && (arg === 'model' || arg === 'effort')) await openPicker($, arg)
   else if (verb === 'toggle' && arg === 'thinking') await toggleThinking($)
   else if (verb === 'page') await scrollRow($, arg as RowId, Number(value) * (drawn.rows[arg as RowId]?.rows ?? 1))
 }
@@ -682,12 +647,10 @@ export const register: Register = (on) => {
     const budget = Math.max(1, Math.min(room, e.props.maxRows, cfg.maxRows) - (said ? 1 : 0))
 
     const drill = isDrill(v.drill) && v.expanded.includes('config') ? v.drill : undefined
-    const pick = v.expanded.includes('model') ? v.pick : undefined
-    const sections = buildSections(inputs, cfg, glyphs, width - indent, drill, pick)
+    const sections = buildSections(inputs, cfg, glyphs, width - indent, drill)
     const b = inputs.breakdown
     const modelRow = sections.find((s) => s.id === 'model')
-    // An open picker is the Model row's detail; without one it is the context breakdown.
-    if (modelRow && !modelRow.detail?.length && b && !cfg.hide.has('model.context')) {
+    if (modelRow && b && !cfg.hide.has('model.context')) {
       const room = width - indent
       modelRow.detail = [stackRuns(b.categories, room), ...legendLines(b.categories, b.maxTokens, room, Infinity)]
     }

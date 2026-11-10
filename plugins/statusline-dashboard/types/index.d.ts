@@ -205,10 +205,9 @@ export type Activity = {
 
 /**
  * The person's view of the band: shown or not, which rows are open (oldest first), and which
- * Config item is drilled into (its list drawn under the row), and whether the Model row's effort
- * picker is open (the levels, listed under that row).
+ * Config item is drilled into (its list drawn under the row).
  */
-export type View = { isVisible: boolean; expanded: string[]; drill?: string; pick?: 'effort' }
+export type View = { isVisible: boolean; expanded: string[]; drill?: string }
 
 declare module 'claude-code' {
   interface PluginState {

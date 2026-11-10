@@ -76,5 +76,5 @@ A Config item's list (what its count is made of) opens with a click on the item 
 `/dash config <item>` (`skills`, `mcp`, `hooks`, `plugins`, `exts`, …), which also prints the whole
 list; none of that needs the file either. An open row's detail that has more than fits scrolls
 under the mouse wheel or its `▲` `▼`. In the Model row, clicking the model name opens `/model`,
-clicking the effort opens its levels, and clicking the lightbulb toggles thinking; these change Claude Code's own settings, not
+clicking the effort opens `/effort`, and clicking the lightbulb toggles thinking; these change Claude Code's own settings, not
 this file.

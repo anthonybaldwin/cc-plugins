@@ -41,7 +41,7 @@ view. Run `/plugin uninstall context-bar@cc-plugins`.
 | `/dash` | Show or hide the whole dashboard. Your choice is remembered across sessions. |
 | `/dash <row>` | Open or close one row (`/dash config`) |
 | Click the model name in the Model row | Open Claude Code's `/model` picker |
-| Click the effort | Open the effort levels (`low` … `max`) and the thinking switch under the row; click one to set it |
+| Click the effort | Open Claude Code's `/effort` picker |
 | Click the lightbulb | Turn thinking on or off. It shows dim while thinking is off. On a model that can't turn thinking off, a line above the dashboard says so. |
 | Click a Config item (its icon or count), or Tab to it and Enter | Open that item's list under the row: what the count is made of, one per line. Click it again to close, or another item to swap. |
 | Mouse wheel over the dashboard, or a row's `▲` `▼` | Scroll an open row's detail when it has more than fits. The wheel moves the row you opened last; each row's `▲` `▼` page that row. |
@@ -94,8 +94,8 @@ it's up.
 - **Model**: the model (⚡ when fast mode is on), the reasoning effort of the last model request
   (styled to echo Claude Code's `/effort` menu) with a lamp when extended thinking is on, and the
   context gauge. The gauge warns early: yellow from 50%, red from 80%. **Open** for the
-  per-category breakdown. The name, the effort and the lamp are **buttons**: open `/model`, pick
-  an effort level, toggle thinking (see below).
+  per-category breakdown. The name, the effort and the lamp are **buttons**: open `/model`, open
+  `/effort`, toggle thinking (see below).
 - **Limits**: the `5h` and `7d` windows with bars, percentages, reset times and a signed **pace
   balance** against even consumption. `+N%` (green) is quota in hand, `-N%` (yellow) is burning
   ahead, and it's dim within ±2%. It also shows model-scoped weekly caps from the OAuth usage API
@@ -131,19 +131,13 @@ disk and gated on workspace trust the same way Claude Code gates loading.
 
 ### Changing the model, effort and thinking from the Model row
 
-- **Model**: clicking the name opens Claude Code's own `/model` picker. The models your account
-  is offered, by version, are not something a mod can list, so the dashboard doesn't draw a list
-  of its own.
-- **Effort**: picking a level runs `/effort <level>`, as if you had typed it, so its line shows in
-  the transcript and Claude Code checks the level against the model. The effort item appears once
-  the session's first model request has reported a level.
-- **Thinking**: the lamp, and the `thinking` line under the effort levels, flip the `/config`
-  menu's "Thinking mode". Some models can't turn thinking off, and a managed setting can own it:
-  then the line reads `locked for this model` and a click answers with a line above the dashboard's
-  first row saying so, which clears after a few seconds.
-
-While the effort list is open it takes the place of the context breakdown under the row; picking,
-or clicking the effort again, brings the breakdown back.
+- **Model** and **effort**: clicking either opens Claude Code's own picker, `/model` or `/effort`,
+  as if you had typed the command. Those pickers know what a mod can't list: the models your
+  account is offered, by version, and the effort levels the current model takes. The effort item
+  appears once the session's first model request has reported a level.
+- **Thinking**: the lamp flips the `/config` menu's "Thinking mode". Some models can't turn
+  thinking off, and a managed setting can own it: then a click answers with a line above the
+  dashboard's first row saying so, which clears after a few seconds.
 
 ### What a Config item's list shows
 
@@ -294,4 +288,4 @@ request itself, so the token never reaches the mod.
 Tests: `claude plugin test plugins/statusline-dashboard` covers the layout arithmetic (width,
 height budget, the breakdown bar), the parsers, the activity bookkeeping, drawing on both
 surfaces, toggling rows, the Config lists (what they hold, opening one, scrolling it), `/dash`, the
-scrolling of any open row, the Model row's pickers and thinking toggle, the user config, and the 1.x cleanup.
+scrolling of any open row, the Model row's buttons, the user config, and the 1.x cleanup.
