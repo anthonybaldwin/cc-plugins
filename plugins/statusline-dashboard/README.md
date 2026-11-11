@@ -137,9 +137,9 @@ disk and gated on workspace trust the same way Claude Code gates loading.
 - **Model** and **effort**: clicking either opens Claude Code's own picker, `/model` or `/effort`,
   as if you had typed the command. Those pickers know what a mod can't list: the models your
   account is offered, by version, and the effort levels the current model takes. The row shows
-  the level Claude Code itself reported, in its color: from a model request, or the level
-  `/effort` just saved (typed or clicked; it shows within a second or two). A "this session only"
-  pick saves nothing, so the row follows at your next message. Before either, it shows the level the session started at
+  the level Claude Code itself reported, in its color: from a model request, or from `/effort`'s
+  own answer in the transcript ("Set effort level to medium …"), typed or clicked, saved or for
+  this session only. Before either, it shows the level the session started at
   (`CLAUDE_CODE_EFFORT_LEVEL`, else your saved `effortLevel`), drawn dim until a request confirms
   it.
 - **Thinking**: the lamp flips the `/config` menu's "Thinking mode". Some models can't turn

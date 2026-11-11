@@ -159,41 +159,8 @@ async function refreshControls($: EngineInterface): Promise<void> {
  * /effort knows the levels the model takes. A mod can list neither. Where a plugin may not run
  * the command now, it is put in the prompt box for the person's Enter.
  */
-/** The saved effort level as the settings hold it now: merged, and the user's own file. */
-async function savedEffort($: EngineInterface): Promise<string> {
-  const merged = await $.settings.read({ key: 'effortLevel' }).catch(() => undefined)
-  const user = (await $.settings.read({ source: 'user' }).catch(() => ({}))) as Record<string, unknown>
-  return `${String(merged ?? '')}|${String(user.effortLevel ?? '')}`
-}
-
-/**
- * Watches for /effort saving a new level, for a minute from when the command was asked for, and
- * shows it the moment it lands. The picker's answer ("Set effort level to medium …") is printed
- * to the transcript but does not come back as the command's result, so the setting it writes is
- * the one sign a mod gets before the next model request. A level saved by /effort is the level
- * in force; this is the only place a setting becomes `effortNow`, and only on a change seen
- * right after the command. (A "this session only" pick writes no setting: the row follows at the
- * next request.)
- */
-async function watchEffort($: EngineInterface): Promise<void> {
-  const before = await savedEffort($)
-  const look = async (left: number): Promise<void> => {
-    const now = await savedEffort($)
-    if (now !== before) {
-      const [was = '', wasUser = ''] = before.split('|')
-      const [merged = '', user = ''] = now.split('|')
-      const level = startEffort(undefined, merged !== was ? merged : user !== wasUser ? user : undefined)
-      if (level) await update($, model, (m) => (m ? { ...m, effortNow: level, effortSaved: level } : m))
-      return
-    }
-    if (left > 0) $.clock.after(1000, () => void look(left - 1))
-  }
-  $.clock.after(1000, () => void look(60))
-}
-
 async function openPicker($: EngineInterface, command: 'model' | 'effort'): Promise<void> {
   let said: string | undefined
-  if (command === 'effort') await watchEffort($)
   try {
     said = (await $.command.run({ command })).text
   } catch {
@@ -202,8 +169,8 @@ async function openPicker($: EngineInterface, command: 'model' | 'effort'): Prom
     return
   }
   await refreshBreakdown($)
-  // /effort answers with the level it set ("Set effort level to medium …"): the row takes that
-  // word now rather than waiting for the next model request. A cancelled picker says nothing.
+  // Where /effort's answer does come back as the command's result, take it; the row the answer
+  // leaves in the conversation is the signal that always arrives (the session.append hook).
   const level = command === 'effort' ? effortSaid(said) : undefined
   if (level) await update($, model, (m) => (m ? { ...m, effortNow: level } : m))
 }
@@ -214,9 +181,19 @@ export function startEffort(env: string | undefined, setting: unknown): string |
   return level(env) ?? level(setting)
 }
 
-/** The level /effort's answer names, when it names one. */
+/**
+ * The level /effort's answer names, when it names one: "Set effort level to medium (saved as your
+ * default for new sessions): …", "… (this session only)", "Kept effort level as high".
+ */
 export function effortSaid(text: string | undefined): string | undefined {
-  return text?.match(/effort level (?:to|as|is) ["'`]?(low|medium|high|xhigh|max)\b/i)?.[1]?.toLowerCase()
+  return text?.match(/\b(?:set|kept) effort level (?:to|as) ["'`]?(low|medium|high|xhigh|max)\b/i)?.[1]?.toLowerCase()
+}
+
+/** The text a conversation row holds: its text blocks, joined. */
+function rowText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content.map((b) => (b && typeof b === 'object' && typeof (b as { text?: unknown }).text === 'string' ? (b as { text: string }).text : '')).join('\n')
 }
 
 async function toggleThinking($: EngineInterface): Promise<void> {
@@ -587,8 +564,6 @@ export const register: Register = (on) => {
   on('prompt.submit', async ($, e, next) => {
     if (!e.isMeta) {
       const command = e.command ? `/${e.command.name}` : undefined
-      // /effort typed: its picker may save a new level any moment from here.
-      if (e.command?.name === 'effort') await watchEffort($)
       await update($, activity, (a) => ({ ...(a ?? emptyActivity()), command }))
     }
     return next(e)
@@ -608,9 +583,21 @@ export const register: Register = (on) => {
     return result
   }).catch(($, e, next) => next(e)) // observing only: on a failure, carry on as if unhooked
 
-  // /effort typed by the person (the row's own click goes through openPicker: a plugin's
-  // `$.command.run` skips that plugin's hooks). Its answer names the level it set, which is the
-  // level in force from here on, well before the next model request says so.
+  // /effort's answer ("Set effort level to medium …") is the one word on the level in force
+  // between model requests, and it reaches a mod in one place for certain: the row it leaves in
+  // the conversation, raised here once as it is stored, however the command was run (typed,
+  // clicked in the band, its picker confirmed with Enter or `s`). The command's own result does
+  // not carry it for the picker, and the saved setting is silent on a session-only pick.
+  on('session.append', { door: ['command', 'notice'] }, async ($, e, next) => {
+    const stored = await next(e)
+    if (e.agentId === undefined && e.origin.kind !== 'model') {
+      const level = effortSaid(rowText(e.message.content))
+      if (level) await update($, model, (m) => (m ? { ...m, effortNow: level } : m))
+    }
+    return stored
+  }).catch(($, e, next) => next(e)) // observing only: on a failure, carry on as if unhooked
+
+  // The same answer where it does come back as the command's result (a typed `/effort high`).
   on('command.run', { command: 'effort' }, async ($, e, next) => {
     const result = await next(e)
     const level = effortSaid(result.text)

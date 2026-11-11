@@ -735,13 +735,13 @@ test('the effort shows only what the engine reported, and /effort\'s own answer'
   await ui.press({ key: 'item:open:effort' })
   expect(menu.ran).toEqual(['/effort'])
   expect([(await ui.find({ type: 'Text', text: 'medium' })) !== undefined, effortSaid(menu.says), effortSaid('Cancelled'), effortSaid(undefined)]).toEqual([false, 'xhigh', undefined, undefined])
-  // The picker saving a new level is seen within a second or two, with no answer text at all.
-  menu.says = undefined
-  await ui.press({ key: 'item:open:effort' })
-  expect(await ui.find({ type: 'Text', text: 'low' })).toBeUndefined()
-  saved.effortLevel = 'low'
-  await clock.advance(2500)
+  // The picker's answer, as the row it leaves in the conversation: the signal that always arrives.
+  const row = (text: string, door: string, kind = 'engine') => $.session.append({ message: { type: 'system', name: 'local_command', content: [{ type: 'text', text }] }, door, origin: { kind }, uuid: 'u1' } as never)
+  await row('<local-command-stdout>Set effort level to low (this session only): Quick</local-command-stdout>', 'command')
   expect((await ui.find({ type: 'Text', text: 'low' }))?.props.dimColor).toBeFalsy()
+  // The model merely talking about effort changes nothing.
+  await row('I set effort level to high for you', 'notice', 'model')
+  expect(await ui.find({ type: 'Text', text: 'low' })).toBeDefined()
   // Typed by the person, /effort is heard too.
   menu.says = 'Set effort level to medium (saved as your default for new sessions): Balanced'
   await $.command.run({ command: 'effort', args: 'medium', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } } as never)
