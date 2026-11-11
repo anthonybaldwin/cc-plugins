@@ -374,9 +374,11 @@ function modelRow(x: Inputs, cfg: Config, on: (id: string) => boolean, icon: Ico
   // thinking off, a managed setting) the press says so: a lamp that just ignores clicks reads as broken.
   const lamp: Run[] = m && on('model.thinking') ? icon(G.think, m.thinking ? c256(183) : undefined).map((r, i) => (i === 0 && !m.thinking ? { ...r, d: true } : r)) : []
   const think = button(lamp, 'toggle:thinking')
-  // With no level known yet (no setting saved, no request made) the button still stands, as a dim
-  // `effort`: it is the way to /effort, and a row that drops it reads as "can't be changed".
-  const effort = m && on('model.effort') ? button(m.effortNow ? effortRuns(m.effortNow, icon) : [...icon(G.effort, SILVER), d('effort')], 'open:effort') : []
+  // The level the engine reported, in its colors; before it has spoken, the level the session
+  // started at, dim (not yet confirmed by a request); with neither, a dim `effort`. Always a
+  // button: it is the way to /effort, and a row that drops it reads as "can't be changed".
+  const level = m?.effortNow ? effortRuns(m.effortNow, icon) : [...icon(G.effort, SILVER), d(m?.effortSaved ?? 'effort')]
+  const effort = m && on('model.effort') ? button(level, 'open:effort') : []
   if (effort.length) items.push(plain([...effort, ...(think.length ? [v(' '), ...think] : [])]))
   else if (think.length) items.push(plain(think))
   const u = x.usage

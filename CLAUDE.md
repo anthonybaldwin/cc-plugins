@@ -102,6 +102,12 @@ key must be declared in `types/index.d.ts`.
   stays a button and a locked press says why. A change the engine refuses is never swallowed:
   `say()` shows it as a line above the band's first row for a few seconds (the `notice` atom, one
   line of the budget), not as a toast, which lands in the far corner of the screen.
+- **The effort shown.** `Model.effortNow` is the engine's own word only: `turn.step`'s `e.effort`,
+  or the level `/effort`'s answer names (`effortSaid`; the `command.run{effort}` hook for a typed
+  one, `openPicker` for a clicked one, since a plugin's own `$.command.run` skips its hooks).
+  `Model.effortSaved` is the level a session starts at (env, else the `effortLevel` setting) and
+  is drawn dim, only while `effortNow` is unknown. Never write a setting into `effortNow`: the two
+  part after an in-session `/effort`, and the row then contradicts the picker (it happened).
 - **Other clickables.** The last commit's short id is a `Run.href` to its page on the host
   (`commitUrl`: GitHub, GitLab, Bitbucket), only when `git branch -r --contains HEAD` finds a
   remote branch holding it — unpushed, the page is a 404. The Info. row's folder is a Button

@@ -81,6 +81,12 @@ export type Model = {
    * name, which is not the level in force, and state outlives a reload.)
    */
   effortNow?: string
+  /**
+   * The level a session starts at: `CLAUDE_CODE_EFFORT_LEVEL`, else the `effortLevel` setting. What
+   * the row shows (dim) until the engine has spoken; an /effort change made in the session is
+   * not in it, which is why it never stands in for `effortNow` once that is known.
+   */
+  effortSaved?: string
   thinking: boolean
   fast: boolean
 }

@@ -175,6 +175,12 @@ async function openPicker($: EngineInterface, command: 'model' | 'effort'): Prom
   if (level) await update($, model, (m) => (m ? { ...m, effortNow: level } : m))
 }
 
+/** The level a session starts at: the env override when it names one, else the saved setting. */
+export function startEffort(env: string | undefined, setting: unknown): string | undefined {
+  const level = (v: unknown) => (typeof v === 'string' && /^(low|medium|high|xhigh|max)$/i.test(v) ? v.toLowerCase() : undefined)
+  return level(env) ?? level(setting)
+}
+
 /** The level /effort's answer names, when it names one. */
 export function effortSaid(text: string | undefined): string | undefined {
   return text?.match(/effort level (?:to|as|is) ["'`]?(low|medium|high|xhigh|max)\b/i)?.[1]?.toLowerCase()
@@ -246,12 +252,15 @@ async function refreshBreakdown($: EngineInterface): Promise<void> {
   // and MAX_THINKING_TOKENS, when set, decides alone (0 = off), as the engine's own check does.
   const budget = await $.env.get('MAX_THINKING_TOKENS')
   const thinking = budget ? Number(budget) > 0 : settings.alwaysThinkingEnabled !== false
+  const effortSaved = startEffort(await $.env.get('CLAUDE_CODE_EFFORT_LEVEL'), settings.effortLevel)
   await update($, model, (m) => ({
     name: name || m?.name || 'Unknown Model',
-    // Only what the engine itself reported (turn.step, /effort's own answer). The saved
-    // `effortLevel` setting is not the level in force: a session-only pick, an env override or a
-    // model's clamp all part them, and showing it read as a wrong level.
+    // The level in force is the engine's own word (turn.step, /effort's answer). Until it has
+    // spoken — a session that has made no request yet — the row falls back to the level a session
+    // starts at, drawn dim: right for a fresh or resumed session, and only ever wrong for a
+    // session whose /effort change this mod was not loaded to hear.
     effortNow: m?.effortNow,
+    effortSaved,
     thinking,
     fast: settings.fastMode === true,
   }))

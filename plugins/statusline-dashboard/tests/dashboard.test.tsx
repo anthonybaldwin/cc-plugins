@@ -3,7 +3,7 @@ import type { On } from 'claude-code'
 
 import { hookEntries, legacyKeys, parseApiUsage, parseChanged, parseGitStatus, parseLastCommit, parseRemote, parseTag } from '../hooks/collect'
 import { DROP_ORDER, ROW_IDS, bar, cells, clampScroll, legendLines, listRows, pace, packSection, plan, runsWidth, stack, stackRuns, stripLabels, windowDetail, type Section } from '../hooks/layout'
-import { editLines, effortSaid, emptyActivity, mergeAgents, recordTool, toolTarget } from '../hooks/register'
+import { editLines, effortSaid, emptyActivity, startEffort, mergeAgents, recordTool, toolTarget } from '../hooks/register'
 import { buildSections, commitUrl, drillEntries, drillLines, drillText, parseConfig } from '../hooks/sections'
 import type { Counts, Entry } from '../types'
 
@@ -711,20 +711,23 @@ test('the lamp is a button even when locked, and dim while off', () => {
 
 test('the effort shows only what the engine reported, and /effort\'s own answer', async ($, on) => {
   const menu: Menu = {}
-  const clock = engine(on, {}, {}, undefined, {}, { menu, undefined: { effortLevel: 'high' } }) // a saved level that is NOT the one in force
+  const clock = engine(on, {}, {}, undefined, {}, { menu, undefined: { effortLevel: 'high' } }) // the level this session starts at
   on('turn.step', async function* ($, e) {
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' } as never
   })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await clock.settle()
-  // Before any model request the level is not known: a dim `effort`, never the saved setting.
+  // Before any model request: the level the session starts at, dim.
   const early = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect([(await early.find({ type: 'Text', text: 'high' })) !== undefined, (await early.find({ type: 'Text', text: 'effort' })) !== undefined]).toEqual([false, true])
+  expect(await early.find({ type: 'Text', text: 'high' })).toMatchObject({ props: { dimColor: true } })
   await early.unmount()
+  expect([startEffort('max', 'low'), startEffort('auto', 'low'), startEffort(undefined, 'HIGH'), startEffort(undefined, 7)]).toEqual(['max', 'low', 'high', undefined])
   // Then the level a model request reports.
   for await (const _ of $.turn.step({ turnId: 't1', index: 0, messageCount: 1, model: 'opus', effort: 'medium' } as never) as never as AsyncIterable<unknown>) void _
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: 'medium' })).toBeDefined()
+  // Once the engine has spoken, its word wins over the starting level, in the level's color.
+  expect((await ui.find({ type: 'Text', text: 'medium' }))?.props.dimColor).toBeFalsy()
+  expect(await ui.find({ type: 'Text', text: 'high' })).toBeUndefined()
   // The picker's own answer names the level it set; the row takes that word.
   menu.says = 'Set effort level to xhigh (this session only)'
   await ui.press({ key: 'item:open:effort' })
