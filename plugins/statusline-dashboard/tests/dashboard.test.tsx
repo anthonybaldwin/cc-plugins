@@ -109,6 +109,7 @@ function engine(on: On, files: Record<string, string> = {}, store: Record<string
   on('session.version', () => ({ value: { version: '2.1.310' } }))
   on('session.authorize', () => ({ value: null }))
   on('settings.read', ($, e) => ({ value: (settings[String(e.source)] ?? {}) as never }))
+  // (a `{ key }` read is the merged object's read, projected by the engine)
   on('agent.list', () => ({ value: [] }))
   // Claude Code's /config menu, as far as the Model row reads and sets it; `menu` is the fixture a
   // test passes in `settings.menu`, and it records what was set and which commands were run.
@@ -711,7 +712,8 @@ test('the lamp is a button even when locked, and dim while off', () => {
 
 test('the effort shows only what the engine reported, and /effort\'s own answer', async ($, on) => {
   const menu: Menu = {}
-  const clock = engine(on, {}, {}, undefined, {}, { menu, undefined: { effortLevel: 'high' } }) // the level this session starts at
+  const saved = { effortLevel: 'high' } // the level this session starts at
+  const clock = engine(on, {}, {}, undefined, {}, { menu, undefined: saved })
   on('turn.step', async function* ($, e) {
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' } as never
   })
@@ -733,10 +735,17 @@ test('the effort shows only what the engine reported, and /effort\'s own answer'
   await ui.press({ key: 'item:open:effort' })
   expect(menu.ran).toEqual(['/effort'])
   expect([(await ui.find({ type: 'Text', text: 'medium' })) !== undefined, effortSaid(menu.says), effortSaid('Cancelled'), effortSaid(undefined)]).toEqual([false, 'xhigh', undefined, undefined])
+  // The picker saving a new level is seen within a second or two, with no answer text at all.
+  menu.says = undefined
+  await ui.press({ key: 'item:open:effort' })
+  expect(await ui.find({ type: 'Text', text: 'low' })).toBeUndefined()
+  saved.effortLevel = 'low'
+  await clock.advance(2500)
+  expect((await ui.find({ type: 'Text', text: 'low' }))?.props.dimColor).toBeFalsy()
   // Typed by the person, /effort is heard too.
-  menu.says = 'Set effort level to low (saved as your default for new sessions): Quick'
-  await $.command.run({ command: 'effort', args: 'low', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } } as never)
-  expect(await ui.find({ type: 'Text', text: 'low' })).toBeDefined()
+  menu.says = 'Set effort level to medium (saved as your default for new sessions): Balanced'
+  await $.command.run({ command: 'effort', args: 'medium', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } } as never)
+  expect(await ui.find({ type: 'Text', text: 'medium' })).toBeDefined()
   await ui.unmount()
 })
 

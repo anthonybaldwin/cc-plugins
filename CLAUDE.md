@@ -107,7 +107,10 @@ key must be declared in `types/index.d.ts`.
   one, `openPicker` for a clicked one, since a plugin's own `$.command.run` skips its hooks).
   `Model.effortSaved` is the level a session starts at (env, else the `effortLevel` setting) and
   is drawn dim, only while `effortNow` is unknown. Never write a setting into `effortNow`: the two
-  part after an in-session `/effort`, and the row then contradicts the picker (it happened).
+  part after an in-session `/effort`, and the row then contradicts the picker (it happened). The
+  one exception is `watchEffort`: the picker's answer is printed but does not come back as the
+  command's result, so for a minute after `/effort` is asked for (a click, or `prompt.submit`
+  naming it) the saved level is polled, and a CHANGE in it is taken as the level now in force.
 - **Other clickables.** The last commit's short id is a `Run.href` to its page on the host
   (`commitUrl`: GitHub, GitLab, Bitbucket), only when `git branch -r --contains HEAD` finds a
   remote branch holding it — unpushed, the page is a 404. The Info. row's folder is a Button

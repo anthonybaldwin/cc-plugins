@@ -159,8 +159,41 @@ async function refreshControls($: EngineInterface): Promise<void> {
  * /effort knows the levels the model takes. A mod can list neither. Where a plugin may not run
  * the command now, it is put in the prompt box for the person's Enter.
  */
+/** The saved effort level as the settings hold it now: merged, and the user's own file. */
+async function savedEffort($: EngineInterface): Promise<string> {
+  const merged = await $.settings.read({ key: 'effortLevel' }).catch(() => undefined)
+  const user = (await $.settings.read({ source: 'user' }).catch(() => ({}))) as Record<string, unknown>
+  return `${String(merged ?? '')}|${String(user.effortLevel ?? '')}`
+}
+
+/**
+ * Watches for /effort saving a new level, for a minute from when the command was asked for, and
+ * shows it the moment it lands. The picker's answer ("Set effort level to medium …") is printed
+ * to the transcript but does not come back as the command's result, so the setting it writes is
+ * the one sign a mod gets before the next model request. A level saved by /effort is the level
+ * in force; this is the only place a setting becomes `effortNow`, and only on a change seen
+ * right after the command. (A "this session only" pick writes no setting: the row follows at the
+ * next request.)
+ */
+async function watchEffort($: EngineInterface): Promise<void> {
+  const before = await savedEffort($)
+  const look = async (left: number): Promise<void> => {
+    const now = await savedEffort($)
+    if (now !== before) {
+      const [was = '', wasUser = ''] = before.split('|')
+      const [merged = '', user = ''] = now.split('|')
+      const level = startEffort(undefined, merged !== was ? merged : user !== wasUser ? user : undefined)
+      if (level) await update($, model, (m) => (m ? { ...m, effortNow: level, effortSaved: level } : m))
+      return
+    }
+    if (left > 0) $.clock.after(1000, () => void look(left - 1))
+  }
+  $.clock.after(1000, () => void look(60))
+}
+
 async function openPicker($: EngineInterface, command: 'model' | 'effort'): Promise<void> {
   let said: string | undefined
+  if (command === 'effort') await watchEffort($)
   try {
     said = (await $.command.run({ command })).text
   } catch {
@@ -554,6 +587,8 @@ export const register: Register = (on) => {
   on('prompt.submit', async ($, e, next) => {
     if (!e.isMeta) {
       const command = e.command ? `/${e.command.name}` : undefined
+      // /effort typed: its picker may save a new level any moment from here.
+      if (e.command?.name === 'effort') await watchEffort($)
       await update($, activity, (a) => ({ ...(a ?? emptyActivity()), command }))
     }
     return next(e)
