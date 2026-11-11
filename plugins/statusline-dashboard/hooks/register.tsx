@@ -172,7 +172,7 @@ async function openPicker($: EngineInterface, command: 'model' | 'effort'): Prom
   // /effort answers with the level it set ("Set effort level to medium …"): the row takes that
   // word now rather than waiting for the next model request. A cancelled picker says nothing.
   const level = command === 'effort' ? effortSaid(said) : undefined
-  if (level) await update($, model, (m) => (m ? { ...m, effort: level } : m))
+  if (level) await update($, model, (m) => (m ? { ...m, effortNow: level } : m))
 }
 
 /** The level /effort's answer names, when it names one. */
@@ -251,7 +251,7 @@ async function refreshBreakdown($: EngineInterface): Promise<void> {
     // Only what the engine itself reported (turn.step, /effort's own answer). The saved
     // `effortLevel` setting is not the level in force: a session-only pick, an env override or a
     // model's clamp all part them, and showing it read as a wrong level.
-    effort: m?.effort,
+    effortNow: m?.effortNow,
     thinking,
     fast: settings.fastMode === true,
   }))
@@ -505,7 +505,7 @@ export const register: Register = (on) => {
     const started = await $.clock.now()
     if (typeof e.effort === 'string' || typeof e.effort === 'number') {
       const effort = String(e.effort)
-      await update($, model, (m) => (m ? { ...m, effort } : m))
+      await update($, model, (m) => (m ? { ...m, effortNow: effort } : m))
     }
     try {
       return yield* next(e)
@@ -561,6 +561,16 @@ export const register: Register = (on) => {
     await update($, activity, (a) => recordTool(a ?? emptyActivity(), name, input, String(result.text ?? ''), 'deny' in result || result.isError === true))
     // A foreground agent's call returns as the agent finishes: look before the roster drops it.
     if (name === 'Agent' || name === 'Task') await refreshAgents($)
+    return result
+  }).catch(($, e, next) => next(e)) // observing only: on a failure, carry on as if unhooked
+
+  // /effort typed by the person (the row's own click goes through openPicker: a plugin's
+  // `$.command.run` skips that plugin's hooks). Its answer names the level it set, which is the
+  // level in force from here on, well before the next model request says so.
+  on('command.run', { command: 'effort' }, async ($, e, next) => {
+    const result = await next(e)
+    const level = effortSaid(result.text)
+    if (level) await update($, model, (m) => (m ? { ...m, effortNow: level } : m))
     return result
   }).catch(($, e, next) => next(e)) // observing only: on a failure, carry on as if unhooked
 

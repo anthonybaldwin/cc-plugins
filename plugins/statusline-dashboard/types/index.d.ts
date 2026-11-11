@@ -74,8 +74,13 @@ export type Breakdown = {
 /** What the model row shows beyond the model name. */
 export type Model = {
   name: string
-  /** The last model request's effort level (turn.step reports it); absent on models without one. */
-  effort?: string
+  /**
+   * The effort level in force, by the engine's own word: the last model request's (turn.step), or
+   * the level /effort's answer named. Absent until one of them has spoken, and on models without
+   * effort. (Named `effortNow`, not `effort`: a 2.2 pre-release kept the saved setting under that
+   * name, which is not the level in force, and state outlives a reload.)
+   */
+  effortNow?: string
   thinking: boolean
   fast: boolean
 }

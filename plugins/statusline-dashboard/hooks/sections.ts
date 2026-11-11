@@ -376,7 +376,7 @@ function modelRow(x: Inputs, cfg: Config, on: (id: string) => boolean, icon: Ico
   const think = button(lamp, 'toggle:thinking')
   // With no level known yet (no setting saved, no request made) the button still stands, as a dim
   // `effort`: it is the way to /effort, and a row that drops it reads as "can't be changed".
-  const effort = m && on('model.effort') ? button(m.effort ? effortRuns(m.effort, icon) : [...icon(G.effort, SILVER), d('effort')], 'open:effort') : []
+  const effort = m && on('model.effort') ? button(m.effortNow ? effortRuns(m.effortNow, icon) : [...icon(G.effort, SILVER), d('effort')], 'open:effort') : []
   if (effort.length) items.push(plain([...effort, ...(think.length ? [v(' '), ...think] : [])]))
   else if (think.length) items.push(plain(think))
   const u = x.usage

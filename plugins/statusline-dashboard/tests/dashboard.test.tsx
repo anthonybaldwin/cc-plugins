@@ -164,7 +164,7 @@ test('the context stack fills the width exactly, skips deferred rows, and keeps 
 
 test('a packed row never exceeds the width, whatever the width', () => {
   const cfg = parseConfig({})
-  const x = { usage: null, breakdown: null, model: { name: 'Opus 4.7', effort: 'xhigh', thinking: true, fast: true }, repo: null, host: { os: { kind: 'linux' as const, label: 'Debian 12' }, user: 'me', host: 'box', fleet: ['a', 'b', 'c'] }, info: { cwd: '/home/me/src/some/very/deeply/nested/project/dir', home: '/home/me', version: '2.1.310', sessionId: 'abcd-1' }, counts: null, api: null, activity: emptyActivity(), now: 0 }
+  const x = { usage: null, breakdown: null, model: { name: 'Opus 4.7', effortNow: 'xhigh', thinking: true, fast: true }, repo: null, host: { os: { kind: 'linux' as const, label: 'Debian 12' }, user: 'me', host: 'box', fleet: ['a', 'b', 'c'] }, info: { cwd: '/home/me/src/some/very/deeply/nested/project/dir', home: '/home/me', version: '2.1.310', sessionId: 'abcd-1' }, counts: null, api: null, activity: emptyActivity(), now: 0 }
   for (const glyphs of [true, false]) {
     for (const width of [20, 33, 47, 80, 140]) {
       for (const s of buildSections(x, cfg, glyphs)) {
@@ -694,7 +694,7 @@ test('the Model row: the name opens /model, the lamp toggles thinking', async ($
 })
 
 test('the lamp is a button even when locked, and dim while off', () => {
-  const x = (controls: unknown) => ({ model: { name: 'Opus 4.7', effort: 'medium', thinking: false, fast: false }, controls, now: 0 }) as never
+  const x = (controls: unknown) => ({ model: { name: 'Opus 4.7', effortNow: 'medium', thinking: false, fast: false }, controls, now: 0 }) as never
   const row = (controls: unknown) => buildSections(x(controls), parseConfig({ rows: ['model'] }), true).find((s) => s.id === 'model')
   const words = (controls: unknown) => [...new Set(row(controls)?.items.flatMap((it) => it.wide.flatMap((r) => (r.press ? [r.press] : []))))]
   expect(words({ thinking: { value: false, locked: false } })).toEqual(['open:model', 'open:effort', 'toggle:thinking'])
@@ -704,6 +704,9 @@ test('the lamp is a button even when locked, and dim while off', () => {
   // No level known yet: the effort button still stands, as a dim `effort`.
   const fresh = buildSections({ model: { name: 'Fable', thinking: true, fast: false }, now: 0 } as never, parseConfig({ rows: ['model'] }), false).find((s) => s.id === 'model')
   expect(fresh?.items.flatMap((it) => it.wide).filter((r) => r.press === 'open:effort').map((r) => r.t)).toEqual(['effort'])
+  // A level an earlier build left in state under the old name is not shown either.
+  const stale = buildSections({ model: { name: 'Fable', effort: 'high', thinking: true, fast: false }, now: 0 } as never, parseConfig({ rows: ['model'] }), false).find((s) => s.id === 'model')
+  expect(stale?.items.flatMap((it) => it.wide).some((r) => r.t === 'high')).toBe(false)
 })
 
 test('the effort shows only what the engine reported, and /effort\'s own answer', async ($, on) => {
@@ -727,6 +730,10 @@ test('the effort shows only what the engine reported, and /effort\'s own answer'
   await ui.press({ key: 'item:open:effort' })
   expect(menu.ran).toEqual(['/effort'])
   expect([(await ui.find({ type: 'Text', text: 'medium' })) !== undefined, effortSaid(menu.says), effortSaid('Cancelled'), effortSaid(undefined)]).toEqual([false, 'xhigh', undefined, undefined])
+  // Typed by the person, /effort is heard too.
+  menu.says = 'Set effort level to low (saved as your default for new sessions): Quick'
+  await $.command.run({ command: 'effort', args: 'low', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } } as never)
+  expect(await ui.find({ type: 'Text', text: 'low' })).toBeDefined()
   await ui.unmount()
 })
 
